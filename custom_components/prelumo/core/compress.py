@@ -58,7 +58,10 @@ def simulate(
         lo = max(p.min_soc / 100 * cap, target) if st.mode is not HourMode.GRID_CHARGE else p.min_soc / 100 * cap
         net = h.load + h.ev - h.pv  # + deficit / - surplus
         bus = 0.0  # + charging
-        if st.mode is HourMode.GRID_CHARGE and soc < target:
+        if st.mode is HourMode.SELL:
+            lo = max(lo, p.min_sell_soc / 100 * cap)
+        charge_ok = p.max_grid_charge_price is None or h.buy <= p.max_grid_charge_price + 1e-9
+        if st.mode is HourMode.GRID_CHARGE and soc < target and charge_ok:
             e = min(target - soc, p.max_charge_kw * eta)
             bus = e / eta
         elif st.mode is HourMode.SELL and soc > lo:
@@ -156,6 +159,9 @@ def to_day_plan(
     slots = []
     for seg in segments:
         dt: datetime = hours[seg.start].start
-        slot = Slot(dt.hour * 100 + dt.minute, power, int(seg.setting.soc), 0)
+        soc = int(seg.setting.soc)
+        if seg.setting.mode is HourMode.SELL:  # sell slot SoC = discharge floor
+            soc = max(soc, params.min_sell_soc)
+        slot = Slot(dt.hour * 100 + dt.minute, power, soc, 0)
         slots.append(slot.with_mode(_MODE_TO_SLOT[seg.setting.mode]))
     return DayPlan(tuple(slots)).merge_preserved_flags(current)

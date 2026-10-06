@@ -44,6 +44,8 @@ class BatteryParams:
     grid_import_kw: float = 17.0
     grid_export_kw: float = 12.0
     soc_step: int = 2
+    max_grid_charge_price: float | None = None  # PLN/kWh; no grid charging above it (None = no limit)
+    min_sell_soc: int = 20  # %; battery never exports below this SoC
 
     @property
     def eta(self) -> float:
@@ -129,7 +131,9 @@ def _transition(
     delivered = -bus if bus < 0 else 0.0
     battery_export = max(0.0, delivered - deficit)
 
-    if battery_export > EPS and (strategy is Strategy.SELF_CONSUMPTION or not may_export):
+    if battery_export > EPS and (strategy is Strategy.SELF_CONSUMPTION or not may_export or s1 < p.min_sell_soc):
+        return None
+    if grid_charge > EPS and p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9:
         return None
     if h.ev > EPS and not h.ev_battery_allowed and delivered > base_deficit + EPS:
         return None

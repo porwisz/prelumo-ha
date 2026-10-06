@@ -103,3 +103,28 @@ def test_write_guard():
     assert g.decide(a, c, D0 + timedelta(minutes=10))[1][0] == "min_interval"
     g.record(D0 + timedelta(hours=1))
     assert g.decide(a, c, D0 + timedelta(hours=3))[1][0] == "daily_write_limit"
+
+
+def test_max_grid_charge_price_blocks_expensive_charging():
+    from dataclasses import replace
+    buy = [1.0] * 7 + [1.4] * 17  # cheapest hours cost 1.0
+    hrs = day(buy, FLAT_SELL)
+    free = optimize(hrs, 10, P, Strategy.SELF_CONSUMPTION)
+    assert any(h.mode is HourMode.GRID_CHARGE for h in free.hours)
+    capped = optimize(hrs, 10, replace(P, max_grid_charge_price=0.65), Strategy.SELF_CONSUMPTION)
+    assert all(h.grid_charge < 0.06 for h in capped.hours)
+    ok = optimize(hrs, 10, replace(P, max_grid_charge_price=1.0), Strategy.SELF_CONSUMPTION)
+    assert all(h.grid_charge < 0.06 for h in ok.hours if h.start.hour >= 7)  # only at <= 1.0
+
+
+def test_min_sell_soc_floor():
+    from dataclasses import replace
+    sell = [0.3] * 24
+    sell[19] = 3.0
+    hrs = day([0.6] * 24, sell)
+    r = optimize(hrs, 60, replace(P, min_sell_soc=40), Strategy.MAX_GRID_TRADING)
+    assert r.hours[19].mode is HourMode.SELL
+    assert all(h.soc_end >= 40 for h in r.hours if h.battery_export > 0.06)
+    segs, _ = compress(r.hours, hrs, 60, replace(P, min_sell_soc=40))
+    plan = to_day_plan(segs, hrs, replace(P, min_sell_soc=40))
+    assert all(s.soc >= 40 for s in plan.slots if s.mode is SlotMode.SELL)

@@ -82,6 +82,8 @@ OPT_MAX_WRITES: Final = "max_writes_per_day"
 OPT_SOC_TOLERANCE: Final = "soc_tolerance"
 OPT_FALLBACK_PLAN: Final = "fallback_plan"
 OPT_STALE_HOURS: Final = "stale_hours"
+OPT_MAX_CHARGE_PRICE: Final = "max_grid_charge_price"
+OPT_MIN_SELL_SOC: Final = "min_sell_soc"
 
 OPTION_DEFAULTS: Final = {
     OPT_CAPACITY: 20.0,
@@ -110,6 +112,8 @@ OPTION_DEFAULTS: Final = {
     OPT_SOC_TOLERANCE: 5,
     OPT_FALLBACK_PLAN: "05:00 20 none; 13:00 20 none; 16:00 20 none; 19:00 20 none; 22:00 20 none; 23:00 20 none",
     OPT_STALE_HOURS: 6,
+    OPT_MAX_CHARGE_PRICE: 0.0,  # 0 = lowest G13 price
+    OPT_MIN_SELL_SOC: 20,
 }
 
 # --- runtime switches / select (restored state) ------------------------

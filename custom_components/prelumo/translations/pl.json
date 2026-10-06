@@ -107,10 +107,14 @@
           "max_writes_per_day": "Maks. zapisów do falownika na dobę",
           "soc_tolerance": "Zmiana SoC warta zapisu",
           "stale_hours": "Trzymaj ostatni plan przez (h) przy braku danych",
-          "fallback_plan": "Plan awaryjny"
+          "fallback_plan": "Plan awaryjny",
+          "max_grid_charge_price": "Maks. cena ładowania z sieci",
+          "min_sell_soc": "Min. SoC przy sprzedaży"
         },
         "data_description": {
-          "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell"
+          "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell",
+          "max_grid_charge_price": "Bateria ładuje się z sieci tylko gdy cena zakupu ≤ tej wartości. 0 = najniższa cena z taryfy G13.",
+          "min_sell_soc": "Bateria nie sprzedaje do sieci poniżej tego poziomu."
         }
       }
     },

@@ -31,6 +31,13 @@ Priorytet zapotrzebowania Tesli: ręczny cel > kalendarz (start wydarzenia = wyj
 „90%” w tytule = cel) > auto podłączone (SoC → limit) > wyuczony wzorzec.
 Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo jest awaria sieci.
 
+### Limity
+
+- **Maks. cena ładowania z sieci** — bateria ładuje się z sieci tylko, gdy cena zakupu ≤ limit
+  (domyślnie 0 = najniższa cena z taryfy G13, czyli w praktyce tylko strefa pozaszczytowa).
+- **Min. SoC przy sprzedaży** (domyślnie 20%) — bateria nie sprzedaje do sieci poniżej tego poziomu;
+  slot Sell nigdy nie dostaje niższego progu.
+
 ### Strategie
 - **Autokonsumpcja** — bateria nigdy nie oddaje do sieci; może ładować się z sieci w strefie
   pozaszczytowej, jeśli to obniża koszt.

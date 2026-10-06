@@ -20,7 +20,7 @@ from .const import (
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS,
+    OPT_MAX_CHARGE_PRICE, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS,
 )
 from .core.plan import PlanError
 from .core.planner import parse_fallback_plan
@@ -183,6 +183,8 @@ class PrelumoOptionsFlow(OptionsFlow):
             req(OPT_PRICE_MORNING): _num(0, 5, 0.001, "PLN/kWh"),
             req(OPT_PRICE_AFTERNOON): _num(0, 5, 0.001, "PLN/kWh"),
             req(OPT_PRICE_OFF): _num(0, 5, 0.001, "PLN/kWh"),
+            req(OPT_MAX_CHARGE_PRICE): _num(0, 5, 0.001, "PLN/kWh"),
+            req(OPT_MIN_SELL_SOC): _num(0, 100, 1, "%"),
             req(OPT_MORNING_HOURS): str,
             req(OPT_AFTERNOON_SUMMER): str,
             req(OPT_AFTERNOON_WINTER): str,

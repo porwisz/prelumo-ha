@@ -28,7 +28,7 @@ from .const import (
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
+    OPT_MAX_CHARGE_PRICE, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
     STORAGE_VERSION, UPDATE_INTERVAL,
 )
 from .core.diff import WriteGuard, WritePolicy
@@ -132,7 +132,17 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             roundtrip_efficiency=float(o[OPT_EFFICIENCY]), wear_cost=float(o[OPT_WEAR]),
             grid_import_kw=float(o[OPT_GRID_IMPORT]), grid_export_kw=float(o[OPT_GRID_EXPORT]),
             soc_step=int(o[OPT_SOC_STEP]),
+            max_grid_charge_price=self.max_grid_charge_price(),
+            min_sell_soc=int(o[OPT_MIN_SELL_SOC]),
         )
+
+    def max_grid_charge_price(self) -> float:
+        """Option value, or the lowest G13 zone price when set to 0."""
+        o = self.opt
+        v = float(o[OPT_MAX_CHARGE_PRICE])
+        if v > 0:
+            return v
+        return min(float(o[OPT_PRICE_MORNING]), float(o[OPT_PRICE_AFTERNOON]), float(o[OPT_PRICE_OFF]))
 
     def tariff(self) -> G13Tariff:
         o = self.opt

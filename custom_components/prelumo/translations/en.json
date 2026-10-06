@@ -107,10 +107,14 @@
           "max_writes_per_day": "Max inverter writes per day",
           "soc_tolerance": "SoC change worth writing",
           "stale_hours": "Keep last plan for (hours) when data is missing",
-          "fallback_plan": "Backup plan"
+          "fallback_plan": "Backup plan",
+          "max_grid_charge_price": "Max price for grid charging",
+          "min_sell_soc": "Min SoC when selling"
         },
         "data_description": {
-          "fallback_plan": "6 entries 'HH:MM SOC MODE' separated by ';', mode: none | grid_charge | sell"
+          "fallback_plan": "6 entries 'HH:MM SOC MODE' separated by ';', mode: none | grid_charge | sell",
+          "max_grid_charge_price": "The battery charges from the grid only when the buy price is at or below this. 0 = lowest G13 price.",
+          "min_sell_soc": "The battery never sells to the grid below this level."
         }
       }
     },
