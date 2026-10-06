@@ -154,3 +154,48 @@ async def test_auto_write_once_then_no_rewrite(hass: HomeAssistant, setup) -> No
     resp = await hass.services.async_call(DOMAIN, "replan", {}, blocking=True, return_response=True)
     assert resp["write_decision"] == ["no_material_change"]
     assert len([c for c in calls if c.domain == "esphome"]) == 1
+
+
+async def test_shadow_mode_never_touches_work_mode(hass: HomeAssistant, setup) -> None:
+    entry, calls = setup
+    coord = entry.runtime_data
+    # 19:30 is inside the Sell slot -> Prelumo wants Export First
+    from homeassistant.util import dt as dt_util
+    from unittest.mock import patch
+    t = dt_util.now().replace(hour=19, minute=30)
+    with patch("custom_components.prelumo.coordinator.dt_util.now", return_value=t):
+        await coord.async_refresh()
+    assert coord.data.desired_mode == "Export First"
+    assert coord.data.mode_action == "shadow"
+    assert hass.states.get("select.deye_falownik_ust_tryb_pracy").state == "Zero Export To CT"
+    await hass.services.async_call("switch", "turn_off", {"entity_id": "switch.prelumo_shadow_mode"}, blocking=True)
+    from unittest.mock import AsyncMock
+    coord.writer.ensure_mode = AsyncMock(return_value=True)
+    with patch("custom_components.prelumo.coordinator.dt_util.now", return_value=t):
+        await coord.async_refresh()
+    assert coord.data.mode_action == "set"
+    coord.writer.ensure_mode.assert_awaited_once_with("Export First")
+
+
+async def test_diagnostics(hass: HomeAssistant, setup) -> None:
+    from custom_components.prelumo.diagnostics import async_get_config_entry_diagnostics
+    entry, _ = setup
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["config"]["rce_today"] == "sensor.rce_pse_price"
+    assert diag["controls"]["shadow_mode"] is True
+    assert len(diag["plan"]["proposed"]) == 6 and diag["plan"]["hourly"]
+    assert diag["inverter"]["current_plan"][3]["mode"] == "sell"
+
+
+async def test_reconfigure(hass: HomeAssistant, setup) -> None:
+    entry, _ = setup
+    r = await entry.start_reconfigure_flow(hass)
+    assert r["step_id"] == "reconfigure"
+    r = await hass.config_entries.flow.async_configure(r["flow_id"], {
+        "write_action": "esphome.deye_modbus_zapisz_harmonogram",
+        "mode_select": "select.deye_falownik_ust_tryb_pracy",
+        "rce_today": "sensor.rce_pse_price", "weather": "weather.home", "outage_threshold": 170})
+    assert r["type"] is FlowResultType.ABORT and r["reason"] == "reconfigure_successful"
+    assert entry.data["weather"] == "weather.home"
+    assert entry.data["outage_threshold"] == 170
+    assert "solcast_today" not in entry.data  # cleared field removed

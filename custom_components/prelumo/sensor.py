@@ -36,7 +36,8 @@ def _plan_attrs(c: PrelumoCoordinator) -> dict[str, Any] | None:
     if d is None or d.current_plan is None:
         return None
     return {"slot": (d.active_index or 0) + 1, "slots": d.current_plan.as_list(),
-            "soc": d.current_plan.slots[d.active_index or 0].soc}
+            "soc": d.current_plan.slots[d.active_index or 0].soc,
+            "desired_mode": d.desired_mode, "mode_action": d.mode_action}
 
 
 def _proposed(c: PrelumoCoordinator) -> str | None:

@@ -51,9 +51,16 @@ Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo 
 | `sensor.prelumo_ev_energy_needed`, `_load_forecast`, `_pv_forecast_corrected` | prognozy |
 | `binary_sensor.prelumo_sell_now`, `_grid_outage`, `_fallback_active` | |
 | `select.prelumo_strategy` | autokonsumpcja / maks. handel |
-| `switch.prelumo_auto_mode` | automatyczny tryb pracy i zapisy |
-| `switch.prelumo_shadow_mode` | **domyślnie włączony** — liczy, nie zapisuje planu |
+| `switch.prelumo_auto_mode` | zgoda na sterowanie (tryb pracy i zapisy) |
+| `switch.prelumo_shadow_mode` | **domyślnie włączony** — próba na sucho: liczy plan i tryb pracy, niczego nie zmienia w falowniku |
 | `switch.prelumo_grid_arbitrage` | |
+
+## Gdzie zobaczyć konfigurację i wyniki
+
+- **Ustawienia → Urządzenia i usługi → Prelumo → Konfiguruj** — parametry baterii, G13, Tesli, plan awaryjny.
+- **⋮ → Zmień konfigurację** (reconfigure) — encje źródłowe (RCE, Solcast, pogoda, PC, Tesla, awaria).
+- **⋮ → Pobierz diagnostykę** — jeden JSON: konfiguracja, modele, plan godzinowy, decyzje zapisu.
+- Atrybuty `sensor.prelumo_proposed_plan` / `sensor.prelumo_active_slot` (`desired_mode`, `mode_action`).
 
 ## Usługi
 

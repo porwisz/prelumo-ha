@@ -55,6 +55,8 @@ class PrelumoData:
     sell_now: bool = False
     outage: bool = False
     soc: float | None = None
+    desired_mode: str | None = None  # work mode Prelumo wants (also computed in shadow mode)
+    mode_action: str | None = None  # what happened: set / unchanged / shadow / auto_off / outage
 
 
 @dataclass
@@ -186,10 +188,19 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             data.active_index = plan.active_index(now)
             data.next_change, _ = plan.next_change(now)
             data.sell_now = plan.slots[data.active_index].mode.value == "sell"
-            if self.auto_mode and not outage:
+            data.desired_mode = self.writer.desired_mode(plan, now)
+            if outage:
+                data.mode_action = "outage"
+            elif not self.auto_mode:
+                data.mode_action = "auto_off"
+            elif self.shadow:  # dry run: never touch the inverter
+                data.mode_action = "shadow"
+            else:
                 try:
-                    await self.writer.ensure_mode(self.writer.desired_mode(plan, now))
+                    changed = await self.writer.ensure_mode(data.desired_mode)
+                    data.mode_action = "set" if changed else "unchanged"
                 except HomeAssistantError as err:
+                    data.mode_action = "error"
                     _LOGGER.warning("Work mode change failed: %s", err)
         return data
 

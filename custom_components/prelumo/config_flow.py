@@ -42,6 +42,33 @@ def _opt(key: str, data: dict) -> Any:
     return vol.Optional(key, description={"suggested_value": data.get(key, DEFAULTS.get(key))})
 
 
+def _source_fields() -> dict[str, selector.EntitySelector]:
+    return {
+        CONF_RCE_TODAY: _ent("sensor"),
+        CONF_RCE_TOMORROW: _ent("sensor"),
+        CONF_SOLCAST_TODAY: _ent("sensor"),
+        CONF_SOLCAST_TOMORROW: _ent("sensor"),
+        CONF_WEATHER: _ent("weather"),
+        CONF_HP_POWER: _ent("sensor"),
+        CONF_OUTAGE_ENTITY: _ent(["sensor", "binary_sensor"]),
+    }
+
+
+def _ev_fields() -> dict[str, selector.EntitySelector]:
+    return {
+        CONF_EV_SOC: _ent("sensor"),
+        CONF_EV_LIMIT: _ent(["number", "sensor"]),
+        CONF_EV_PLUGGED: _ent("binary_sensor"),
+        CONF_EV_POWER: _ent("sensor"),
+        CONF_EV_CALENDAR: _ent("calendar"),
+        CONF_EV_MANUAL_SOC: _ent("input_number"),
+        CONF_EV_MANUAL_READY: _ent("input_datetime"),
+    }
+
+
+_ENTITY_KEYS = (*_source_fields(), *_ev_fields())
+
+
 def _hours_range(text: str) -> bool:
     try:
         a, b = (int(x) for x in text.split("-"))
@@ -84,31 +111,35 @@ class PrelumoConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self.async_step_ev()
         d = self._data
         schema = vol.Schema({
-            _opt(CONF_RCE_TODAY, d): _ent("sensor"),
-            _opt(CONF_RCE_TOMORROW, d): _ent("sensor"),
-            _opt(CONF_SOLCAST_TODAY, d): _ent("sensor"),
-            _opt(CONF_SOLCAST_TOMORROW, d): _ent("sensor"),
-            _opt(CONF_WEATHER, d): _ent("weather"),
-            _opt(CONF_HP_POWER, d): _ent("sensor"),
-            _opt(CONF_OUTAGE_ENTITY, d): _ent(["sensor", "binary_sensor"]),
+            **{_opt(k, d): sel for k, sel in _source_fields().items()},
             vol.Optional(CONF_OUTAGE_THRESHOLD, default=DEFAULTS[CONF_OUTAGE_THRESHOLD]): _num(0, 300, 1, "V"),
         })
         return self.async_show_form(step_id="sources", data_schema=schema)
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Change inverter / source / Tesla entities without removing the entry."""
+        entry = self._get_reconfigure_entry()
+        if user_input is not None:
+            data = {**entry.data, **user_input}
+            for key in _ENTITY_KEYS:  # cleared optional field -> remove
+                if key not in user_input:
+                    data.pop(key, None)
+            return self.async_update_reload_and_abort(entry, data=data)
+        d = {**DEFAULTS, **entry.data}
+        schema = vol.Schema({
+            vol.Required(CONF_WRITE_ACTION, default=d.get(CONF_WRITE_ACTION, DEFAULT_WRITE_ACTION)): str,
+            vol.Required(CONF_MODE_SELECT, default=d.get(CONF_MODE_SELECT, DEFAULT_MODE_SELECT)): _ent("select"),
+            **{_opt(k, d): sel for k, sel in _source_fields().items()},
+            vol.Optional(CONF_OUTAGE_THRESHOLD, default=d[CONF_OUTAGE_THRESHOLD]): _num(0, 300, 1, "V"),
+            **{_opt(k, d): sel for k, sel in _ev_fields().items()},
+        })
+        return self.async_show_form(step_id="reconfigure", data_schema=schema)
 
     async def async_step_ev(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             self._data.update(user_input)
             return self.async_create_entry(title="Prelumo", data=self._data, options=dict(OPTION_DEFAULTS))
-        d = self._data
-        schema = vol.Schema({
-            _opt(CONF_EV_SOC, d): _ent("sensor"),
-            _opt(CONF_EV_LIMIT, d): _ent(["number", "sensor"]),
-            _opt(CONF_EV_PLUGGED, d): _ent("binary_sensor"),
-            _opt(CONF_EV_POWER, d): _ent("sensor"),
-            _opt(CONF_EV_CALENDAR, d): _ent("calendar"),
-            _opt(CONF_EV_MANUAL_SOC, d): _ent("input_number"),
-            _opt(CONF_EV_MANUAL_READY, d): _ent("input_datetime"),
-        })
+        schema = vol.Schema({_opt(k, self._data): sel for k, sel in _ev_fields().items()})
         return self.async_show_form(step_id="ev", data_schema=schema)
 
     @staticmethod

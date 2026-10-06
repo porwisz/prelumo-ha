@@ -42,6 +42,29 @@
         "data_description": {
           "ev_calendar": "Event start = departure; '90%' in the title sets the target."
         }
+      },
+      "reconfigure": {
+        "title": "Prelumo — data sources",
+        "description": "Change the entities Prelumo reads and writes. Clear a field to stop using it.",
+        "data": {
+          "rce_today": "RCE price (today)",
+          "rce_tomorrow": "RCE price (tomorrow)",
+          "solcast_today": "Solcast forecast today",
+          "solcast_tomorrow": "Solcast forecast tomorrow",
+          "weather": "Weather (temperature forecast)",
+          "heat_pump_power": "Heat pump power",
+          "outage_entity": "Grid outage indicator (voltage or binary sensor)",
+          "outage_threshold": "Outage below voltage",
+          "ev_soc": "Car battery SoC",
+          "ev_limit": "Charge limit",
+          "ev_plugged": "Charger connected",
+          "ev_power": "Charging power",
+          "ev_calendar": "Trips calendar",
+          "ev_manual_soc": "Manual target SoC (input_number)",
+          "ev_manual_ready": "Manual ready-by time (input_datetime)",
+          "write_action": "Schedule write action",
+          "mode_select": "Work mode select"
+        }
       }
     },
     "error": {
@@ -50,7 +73,8 @@
     },
     "abort": {
       "already_configured": "Prelumo is already configured",
-      "single_instance_allowed": "Only one instance allowed"
+      "single_instance_allowed": "Only one instance allowed",
+      "reconfigure_successful": "Configuration updated"
     }
   },
   "options": {

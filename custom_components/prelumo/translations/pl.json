@@ -42,6 +42,29 @@
         "data_description": {
           "ev_calendar": "Start wydarzenia = wyjazd; '90%' w tytule ustawia cel."
         }
+      },
+      "reconfigure": {
+        "title": "Prelumo — źródła danych",
+        "description": "Zmień encje, które Prelumo czyta i zapisuje. Wyczyść pole, aby go nie używać.",
+        "data": {
+          "rce_today": "Cena RCE (dziś)",
+          "rce_tomorrow": "Cena RCE (jutro)",
+          "solcast_today": "Prognoza Solcast na dziś",
+          "solcast_tomorrow": "Prognoza Solcast na jutro",
+          "weather": "Pogoda (prognoza temperatury)",
+          "heat_pump_power": "Moc pompy ciepła",
+          "outage_entity": "Wskaźnik awarii sieci (napięcie lub binary sensor)",
+          "outage_threshold": "Awaria poniżej napięcia",
+          "ev_soc": "SoC baterii auta",
+          "ev_limit": "Limit ładowania",
+          "ev_plugged": "Ładowarka podłączona",
+          "ev_power": "Moc ładowania",
+          "ev_calendar": "Kalendarz wyjazdów",
+          "ev_manual_soc": "Ręczny cel SoC (input_number)",
+          "ev_manual_ready": "Ręczny termin gotowości (input_datetime)",
+          "write_action": "Akcja zapisu harmonogramu",
+          "mode_select": "Encja trybu pracy"
+        }
       }
     },
     "error": {
@@ -50,7 +73,8 @@
     },
     "abort": {
       "already_configured": "Prelumo jest już skonfigurowane",
-      "single_instance_allowed": "Dozwolona jest tylko jedna instancja"
+      "single_instance_allowed": "Dozwolona jest tylko jedna instancja",
+      "reconfigure_successful": "Konfiguracja zaktualizowana"
     }
   },
   "options": {
