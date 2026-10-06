@@ -1,0 +1,23 @@
+{
+  "domain": "prelumo",
+  "name": "Prelumo",
+  "after_dependencies": [
+    "calendar",
+    "esphome",
+    "weather"
+  ],
+  "codeowners": [
+    "@porwisz"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "recorder"
+  ],
+  "documentation": "https://github.com/porwisz/prelumo-ha",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/porwisz/prelumo-ha/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}

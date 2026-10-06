@@ -1,0 +1,31 @@
+{
+  "entity": {
+    "sensor": {
+      "active_slot": {"default": "mdi:battery-clock"},
+      "next_change": {"default": "mdi:clock-end"},
+      "proposed_plan": {"default": "mdi:calendar-clock"},
+      "expected_savings": {"default": "mdi:cash-plus"},
+      "shadow_savings": {"default": "mdi:cash-check"},
+      "ev_energy_needed": {"default": "mdi:car-electric"},
+      "load_forecast": {"default": "mdi:home-lightning-bolt"},
+      "pv_forecast_corrected": {"default": "mdi:solar-power-variant"}
+    },
+    "binary_sensor": {
+      "sell_now": {"default": "mdi:transmission-tower-export"},
+      "grid_outage": {"default": "mdi:transmission-tower-off"},
+      "fallback_active": {"default": "mdi:lifebuoy"}
+    },
+    "select": {"strategy": {"default": "mdi:strategy"}},
+    "switch": {
+      "auto_mode": {"default": "mdi:auto-mode"},
+      "shadow_mode": {"default": "mdi:ghost"},
+      "grid_arbitrage": {"default": "mdi:swap-horizontal"}
+    }
+  },
+  "services": {
+    "apply_plan": {"service": "mdi:upload"},
+    "read_plan": {"service": "mdi:download"},
+    "set_slot": {"service": "mdi:pencil"},
+    "replan": {"service": "mdi:refresh"}
+  }
+}

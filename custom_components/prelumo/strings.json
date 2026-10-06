@@ -1,0 +1,257 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Prelumo — inverter",
+        "description": "Prelumo — one step ahead of the sun. Choose the inverter entities and write action.",
+        "data": {
+          "inverter_prefix": "Inverter entity prefix",
+          "write_action": "Schedule write action",
+          "mode_select": "Work mode select",
+          "mode_export_first": "Option: Export First",
+          "mode_zero_export": "Option: Zero Export To CT"
+        },
+        "data_description": {
+          "inverter_prefix": "e.g. deye_falownik → sensor.deye_falownik_bateria_soc"
+        }
+      },
+      "sources": {
+        "title": "Data sources",
+        "data": {
+          "rce_today": "RCE price (today)",
+          "rce_tomorrow": "RCE price (tomorrow)",
+          "solcast_today": "Solcast forecast today",
+          "solcast_tomorrow": "Solcast forecast tomorrow",
+          "weather": "Weather (temperature forecast)",
+          "heat_pump_power": "Heat pump power",
+          "outage_entity": "Grid outage indicator (voltage or binary sensor)",
+          "outage_threshold": "Outage below voltage"
+        }
+      },
+      "ev": {
+        "title": "Tesla",
+        "data": {
+          "ev_soc": "Car battery SoC",
+          "ev_limit": "Charge limit",
+          "ev_plugged": "Charger connected",
+          "ev_power": "Charging power",
+          "ev_calendar": "Trips calendar",
+          "ev_manual_soc": "Manual target SoC (input_number)",
+          "ev_manual_ready": "Manual ready-by time (input_datetime)"
+        },
+        "data_description": {
+          "ev_calendar": "Event start = departure; '90%' in the title sets the target."
+        }
+      }
+    },
+    "error": {
+      "inverter_not_found": "No sensor.<prefix>_bateria_soc found",
+      "invalid_action": "Use domain.action"
+    },
+    "abort": {
+      "already_configured": "Prelumo is already configured",
+      "single_instance_allowed": "Only one instance allowed"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Prelumo parameters",
+        "data": {
+          "capacity_kwh": "Battery capacity",
+          "min_soc": "Min SoC",
+          "max_soc": "Max SoC",
+          "max_charge_kw": "Max charge power",
+          "max_discharge_kw": "Max discharge power",
+          "roundtrip_efficiency": "Round-trip efficiency",
+          "wear_cost": "Battery wear cost",
+          "grid_import_kw": "Grid import limit",
+          "grid_export_kw": "Grid export limit",
+          "price_morning_peak": "G13 price: morning peak",
+          "price_afternoon_peak": "G13 price: afternoon peak",
+          "price_off_peak": "G13 price: off-peak",
+          "morning_peak_hours": "Morning peak hours (e.g. 7-13)",
+          "afternoon_peak_summer": "Afternoon peak, summer",
+          "afternoon_peak_winter": "Afternoon peak, winter",
+          "ev_capacity_kwh": "Tesla battery capacity",
+          "ev_charger_kw": "Charger power",
+          "ev_default_target": "Default Tesla target SoC",
+          "hp_base_temp": "Heating base temperature",
+          "history_weeks": "History used for learning (weeks)",
+          "horizon_hours": "Planning horizon",
+          "soc_step": "Optimiser SoC step",
+          "max_writes_per_day": "Max inverter writes per day",
+          "soc_tolerance": "SoC change worth writing",
+          "stale_hours": "Keep last plan for (hours) when data is missing",
+          "fallback_plan": "Backup plan"
+        },
+        "data_description": {
+          "fallback_plan": "6 entries 'HH:MM SOC MODE' separated by ';', mode: none | grid_charge | sell"
+        }
+      }
+    },
+    "error": {
+      "invalid_hours": "Use 'start-end', e.g. 7-13",
+      "invalid_plan": "Backup plan is invalid (6 slots, cyclic order)",
+      "invalid_soc_range": "Min SoC must be below max SoC"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "active_slot": {
+        "name": "Active slot",
+        "state": {
+          "none": "Normal",
+          "grid_charge": "Grid charging",
+          "sell": "Sell"
+        }
+      },
+      "next_change": {
+        "name": "Next change"
+      },
+      "proposed_plan": {
+        "name": "Proposed plan",
+        "state": {
+          "ready": "Ready",
+          "fallback": "Backup plan",
+          "error": "Error"
+        }
+      },
+      "expected_savings": {
+        "name": "Expected savings (24 h)"
+      },
+      "shadow_savings": {
+        "name": "Shadow-mode savings"
+      },
+      "ev_energy_needed": {
+        "name": "Tesla energy needed"
+      },
+      "load_forecast": {
+        "name": "Consumption forecast (24 h)"
+      },
+      "pv_forecast_corrected": {
+        "name": "Corrected PV forecast (24 h)"
+      }
+    },
+    "binary_sensor": {
+      "sell_now": {
+        "name": "Selling now"
+      },
+      "grid_outage": {
+        "name": "Grid outage"
+      },
+      "fallback_active": {
+        "name": "Backup plan active"
+      }
+    },
+    "select": {
+      "strategy": {
+        "name": "Strategy",
+        "state": {
+          "self_consumption": "Self-consumption",
+          "max_grid_trading": "Max grid trading"
+        }
+      }
+    },
+    "switch": {
+      "auto_mode": {
+        "name": "Automatic control"
+      },
+      "shadow_mode": {
+        "name": "Shadow mode (no writes)"
+      },
+      "grid_arbitrage": {
+        "name": "Grid arbitrage"
+      }
+    }
+  },
+  "issues": {
+    "stale_data": {
+      "title": "Prelumo: input data missing",
+      "description": "Missing or stale: {sources}. Prelumo keeps the last plan or uses the backup plan."
+    },
+    "write_failed": {
+      "title": "Prelumo: schedule write failed",
+      "description": "Writing to the inverter failed: {error}"
+    }
+  },
+  "exceptions": {
+    "not_loaded": {
+      "message": "Prelumo is not loaded"
+    },
+    "no_plan": {
+      "message": "No proposed plan yet"
+    }
+  },
+  "selector": {
+    "plan_source": {
+      "options": {
+        "proposed": "Proposed plan",
+        "fallback": "Backup plan"
+      }
+    },
+    "slot_mode": {
+      "options": {
+        "none": "Normal",
+        "grid_charge": "Grid charging",
+        "sell": "Sell"
+      }
+    }
+  },
+  "services": {
+    "apply_plan": {
+      "name": "Apply plan",
+      "description": "Write a plan to the inverter (proposed, backup or explicit 6 slots).",
+      "fields": {
+        "source": {
+          "name": "Source",
+          "description": "Which plan to write when no slots are given."
+        },
+        "slots": {
+          "name": "Slots",
+          "description": "6 × {start, soc, mode, power?}"
+        }
+      }
+    },
+    "read_plan": {
+      "name": "Read plan",
+      "description": "Return the current inverter schedule and the proposed plan."
+    },
+    "set_slot": {
+      "name": "Set slot",
+      "description": "Change one slot of the current schedule and write it.",
+      "fields": {
+        "slot": {
+          "name": "Slot",
+          "description": "1–6"
+        },
+        "start": {
+          "name": "Start",
+          "description": "Slot start"
+        },
+        "soc": {
+          "name": "SoC",
+          "description": "Grid-charge target or discharge floor"
+        },
+        "power": {
+          "name": "Power",
+          "description": "Max battery discharge power"
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "Slot mode"
+        }
+      }
+    },
+    "replan": {
+      "name": "Re-plan now",
+      "description": "Recompute the plan now.",
+      "fields": {
+        "write": {
+          "name": "Write",
+          "description": "Write even in shadow mode (if changed)."
+        }
+      }
+    }
+  }
+}

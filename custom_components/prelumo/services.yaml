@@ -1,0 +1,42 @@
+apply_plan:
+  fields:
+    source:
+      default: proposed
+      selector:
+        select:
+          options: [proposed, fallback]
+          translation_key: plan_source
+    slots:
+      example: >-
+        [{"start": "07:00", "soc": 20, "mode": "none"}, {"start": "13:00", "soc": 100, "mode": "grid_charge"},
+        {"start": "16:00", "soc": 20}, {"start": "19:00", "soc": 40, "mode": "sell"},
+        {"start": "20:00", "soc": 20}, {"start": "21:00", "soc": 40, "mode": "grid_charge"}]
+      selector:
+        object:
+read_plan:
+set_slot:
+  fields:
+    slot:
+      required: true
+      selector:
+        number: {min: 1, max: 6, mode: box}
+    start:
+      selector:
+        time:
+    soc:
+      selector:
+        number: {min: 0, max: 100, unit_of_measurement: "%"}
+    power:
+      selector:
+        number: {min: 0, max: 12000, step: 100, unit_of_measurement: W}
+    mode:
+      selector:
+        select:
+          options: [none, grid_charge, sell]
+          translation_key: slot_mode
+replan:
+  fields:
+    write:
+      default: false
+      selector:
+        boolean:

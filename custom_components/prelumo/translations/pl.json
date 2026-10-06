@@ -1,0 +1,257 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Prelumo — falownik",
+        "description": "Prelumo — one step ahead of the sun. Wskaż encje falownika i akcję zapisu harmonogramu.",
+        "data": {
+          "inverter_prefix": "Prefiks encji falownika",
+          "write_action": "Akcja zapisu harmonogramu",
+          "mode_select": "Encja trybu pracy",
+          "mode_export_first": "Opcja: Export First",
+          "mode_zero_export": "Opcja: Zero Export To CT"
+        },
+        "data_description": {
+          "inverter_prefix": "np. deye_falownik → sensor.deye_falownik_bateria_soc"
+        }
+      },
+      "sources": {
+        "title": "Źródła danych",
+        "data": {
+          "rce_today": "Cena RCE (dziś)",
+          "rce_tomorrow": "Cena RCE (jutro)",
+          "solcast_today": "Prognoza Solcast na dziś",
+          "solcast_tomorrow": "Prognoza Solcast na jutro",
+          "weather": "Pogoda (prognoza temperatury)",
+          "heat_pump_power": "Moc pompy ciepła",
+          "outage_entity": "Wskaźnik awarii sieci (napięcie lub binary sensor)",
+          "outage_threshold": "Awaria poniżej napięcia"
+        }
+      },
+      "ev": {
+        "title": "Tesla",
+        "data": {
+          "ev_soc": "SoC baterii auta",
+          "ev_limit": "Limit ładowania",
+          "ev_plugged": "Ładowarka podłączona",
+          "ev_power": "Moc ładowania",
+          "ev_calendar": "Kalendarz wyjazdów",
+          "ev_manual_soc": "Ręczny cel SoC (input_number)",
+          "ev_manual_ready": "Ręczny termin gotowości (input_datetime)"
+        },
+        "data_description": {
+          "ev_calendar": "Start wydarzenia = wyjazd; '90%' w tytule ustawia cel."
+        }
+      }
+    },
+    "error": {
+      "inverter_not_found": "Nie znaleziono sensor.<prefiks>_bateria_soc",
+      "invalid_action": "Podaj w formacie domena.akcja"
+    },
+    "abort": {
+      "already_configured": "Prelumo jest już skonfigurowane",
+      "single_instance_allowed": "Dozwolona jest tylko jedna instancja"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Parametry Prelumo",
+        "data": {
+          "capacity_kwh": "Pojemność baterii",
+          "min_soc": "Min SoC",
+          "max_soc": "Max SoC",
+          "max_charge_kw": "Maks. moc ładowania",
+          "max_discharge_kw": "Maks. moc rozładowania",
+          "roundtrip_efficiency": "Sprawność round-trip",
+          "wear_cost": "Koszt zużycia baterii",
+          "grid_import_kw": "Limit poboru z sieci",
+          "grid_export_kw": "Limit oddawania do sieci",
+          "price_morning_peak": "Cena G13: szczyt przedpołudniowy",
+          "price_afternoon_peak": "Cena G13: szczyt popołudniowy",
+          "price_off_peak": "Cena G13: pozaszczytowa",
+          "morning_peak_hours": "Godziny szczytu przedpołudniowego (np. 7-13)",
+          "afternoon_peak_summer": "Szczyt popołudniowy, lato",
+          "afternoon_peak_winter": "Szczyt popołudniowy, zima",
+          "ev_capacity_kwh": "Pojemność baterii Tesli",
+          "ev_charger_kw": "Moc ładowarki",
+          "ev_default_target": "Domyślny cel SoC Tesli",
+          "hp_base_temp": "Temperatura bazowa grzania",
+          "history_weeks": "Historia do nauki (tygodnie)",
+          "horizon_hours": "Horyzont planowania",
+          "soc_step": "Krok SoC optymalizatora",
+          "max_writes_per_day": "Maks. zapisów do falownika na dobę",
+          "soc_tolerance": "Zmiana SoC warta zapisu",
+          "stale_hours": "Trzymaj ostatni plan przez (h) przy braku danych",
+          "fallback_plan": "Plan awaryjny"
+        },
+        "data_description": {
+          "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell"
+        }
+      }
+    },
+    "error": {
+      "invalid_hours": "Podaj 'od-do', np. 7-13",
+      "invalid_plan": "Plan awaryjny jest niepoprawny (6 slotów, kolejność w kółko)",
+      "invalid_soc_range": "Min SoC musi być mniejszy niż max SoC"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "active_slot": {
+        "name": "Aktywny slot",
+        "state": {
+          "none": "Normalny",
+          "grid_charge": "Ładowanie z sieci",
+          "sell": "Sprzedaż"
+        }
+      },
+      "next_change": {
+        "name": "Następna zmiana"
+      },
+      "proposed_plan": {
+        "name": "Proponowany plan",
+        "state": {
+          "ready": "Gotowy",
+          "fallback": "Plan awaryjny",
+          "error": "Błąd"
+        }
+      },
+      "expected_savings": {
+        "name": "Oczekiwana oszczędność (24 h)"
+      },
+      "shadow_savings": {
+        "name": "Oszczędność w trybie cienia"
+      },
+      "ev_energy_needed": {
+        "name": "Energia potrzebna Tesli"
+      },
+      "load_forecast": {
+        "name": "Prognoza zużycia (24 h)"
+      },
+      "pv_forecast_corrected": {
+        "name": "Skorygowana prognoza PV (24 h)"
+      }
+    },
+    "binary_sensor": {
+      "sell_now": {
+        "name": "Sprzedaż teraz"
+      },
+      "grid_outage": {
+        "name": "Awaria sieci"
+      },
+      "fallback_active": {
+        "name": "Plan awaryjny aktywny"
+      }
+    },
+    "select": {
+      "strategy": {
+        "name": "Strategia",
+        "state": {
+          "self_consumption": "Autokonsumpcja",
+          "max_grid_trading": "Maks. handel z siecią"
+        }
+      }
+    },
+    "switch": {
+      "auto_mode": {
+        "name": "Sterowanie automatyczne"
+      },
+      "shadow_mode": {
+        "name": "Tryb cienia (bez zapisu)"
+      },
+      "grid_arbitrage": {
+        "name": "Arbitraż z siecią"
+      }
+    }
+  },
+  "issues": {
+    "stale_data": {
+      "title": "Prelumo: brak danych wejściowych",
+      "description": "Brak lub nieaktualne: {sources}. Prelumo trzyma ostatni plan lub używa planu awaryjnego."
+    },
+    "write_failed": {
+      "title": "Prelumo: zapis harmonogramu nieudany",
+      "description": "Zapis do falownika nie powiódł się: {error}"
+    }
+  },
+  "exceptions": {
+    "not_loaded": {
+      "message": "Prelumo nie jest załadowane"
+    },
+    "no_plan": {
+      "message": "Brak proponowanego planu"
+    }
+  },
+  "selector": {
+    "plan_source": {
+      "options": {
+        "proposed": "Proponowany plan",
+        "fallback": "Plan awaryjny"
+      }
+    },
+    "slot_mode": {
+      "options": {
+        "none": "Normalny",
+        "grid_charge": "Ładowanie z sieci",
+        "sell": "Sprzedaż"
+      }
+    }
+  },
+  "services": {
+    "apply_plan": {
+      "name": "Zapisz plan",
+      "description": "Zapisz plan do falownika (proponowany, awaryjny lub podane 6 slotów).",
+      "fields": {
+        "source": {
+          "name": "Źródło",
+          "description": "Który plan zapisać, gdy nie podano slotów."
+        },
+        "slots": {
+          "name": "Sloty",
+          "description": "6 × {start, soc, mode, power?}"
+        }
+      }
+    },
+    "read_plan": {
+      "name": "Odczytaj plan",
+      "description": "Zwraca bieżący harmonogram falownika i proponowany plan."
+    },
+    "set_slot": {
+      "name": "Ustaw slot",
+      "description": "Zmień jeden slot bieżącego harmonogramu i zapisz.",
+      "fields": {
+        "slot": {
+          "name": "Slot",
+          "description": "1–6"
+        },
+        "start": {
+          "name": "Start",
+          "description": "Początek slotu"
+        },
+        "soc": {
+          "name": "SoC",
+          "description": "Cel ładowania z sieci lub próg rozładowania"
+        },
+        "power": {
+          "name": "Moc",
+          "description": "Maks. moc rozładowania baterii"
+        },
+        "mode": {
+          "name": "Tryb",
+          "description": "Tryb slotu"
+        }
+      }
+    },
+    "replan": {
+      "name": "Przelicz plan teraz",
+      "description": "Przelicz plan teraz.",
+      "fields": {
+        "write": {
+          "name": "Zapisz",
+          "description": "Zapisz nawet w trybie cienia (jeśli jest zmiana)."
+        }
+      }
+    }
+  }
+}
