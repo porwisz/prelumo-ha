@@ -45,7 +45,7 @@
       }
     },
     "error": {
-      "inverter_not_found": "No sensor.<prefix>_bateria_soc found",
+      "inverter_not_found": "No sensor.PREFIX_bateria_soc found",
       "invalid_action": "Use domain.action"
     },
     "abort": {
@@ -209,7 +209,7 @@
         },
         "slots": {
           "name": "Slots",
-          "description": "6 × {start, soc, mode, power?}"
+          "description": "6 × (start, soc, mode, power — optional)"
         }
       }
     },

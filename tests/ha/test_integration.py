@@ -84,7 +84,8 @@ async def setup(hass: HomeAssistant, recorder_mock):
     })
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)  # initial plan runs in background
+    assert entry.runtime_data.plan_state.result is not None
     return entry, calls
 
 
