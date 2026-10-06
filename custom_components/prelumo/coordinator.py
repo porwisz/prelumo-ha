@@ -112,7 +112,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self._plan_lock = asyncio.Lock()
         self._yesterday_pv_forecast: dict[datetime, float] = {}
         self._today_pv_forecast: dict[datetime, float] = {}
-        self._sell_seen: dict[datetime, float] = {}  # hourly RCE, kept ~3 days for actual cost
+        self._sell_seen: dict[datetime, float] = {}
+        self._last_recover: datetime | None = None  # hourly RCE, kept ~3 days for actual cost
         self._unsub: list = []
 
     # --- options -------------------------------------------------------
@@ -194,6 +195,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         plan = io.read_current_plan(self.hass, self.inv)
         outage = io.is_outage(self.hass, self.conf.get(CONF_OUTAGE_ENTITY), float(self.conf[CONF_OUTAGE_THRESHOLD]))
         data = PrelumoData(current_plan=plan, outage=outage, soc=io.state_float(self.hass, self.inv.soc))
+        self._maybe_recover(now)
         if plan is not None:
             data.active_index = plan.active_index(now)
             data.next_change, _ = plan.next_change(now)
@@ -213,6 +215,19 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                     data.mode_action = "error"
                     _LOGGER.warning("Work mode change failed: %s", err)
         return data
+
+    @callback
+    def _maybe_recover(self, now: datetime) -> None:
+        """In fallback (e.g. sources not ready after a restart): re-plan as soon as they are back."""
+        ps = self.plan_state
+        if not ps.fallback_active or self._plan_lock.locked():
+            return
+        if self._last_recover and now - self._last_recover < timedelta(minutes=5):
+            return
+        if "battery_soc" in ps.stale_sources and io.state_float(self.hass, self.inv.soc) is None:
+            return
+        self._last_recover = now
+        self.config_entry.async_create_background_task(self.hass, self.async_replan(), f"{DOMAIN}_recover")
 
     async def _hourly(self, _now: datetime) -> None:
         await self.async_replan()

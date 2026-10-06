@@ -10,7 +10,8 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState, HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
@@ -131,8 +132,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PrelumoConfigEntry) -> b
     entry.runtime_data = coord
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_reload))
-    # first plan shortly after start (entities restore strategy/shadow first)
-    entry.async_create_background_task(hass, coord.async_replan(), f"{DOMAIN}_initial_plan")
+    # first plan once HA has started (sources from other integrations are loaded by then)
+    async def _initial_plan(_event: Any = None) -> None:
+        entry.async_create_background_task(hass, coord.async_replan(), f"{DOMAIN}_initial_plan")
+
+    if hass.state is CoreState.running:
+        await _initial_plan()
+    else:
+        entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _initial_plan))
     return True
 
 

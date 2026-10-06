@@ -13,6 +13,8 @@ from datetime import datetime
 from .optimizer import BatteryParams, HourInput, HourMode, HourPlan
 from .plan import MAX_POWER_W, SLOT_COUNT, DayPlan, Slot, SlotMode
 
+CAP_PENALTY = 1e4  # PLN; makes a merge that grid-charges above the price cap unacceptable
+
 _MODE_TO_SLOT = {
     HourMode.NORMAL: SlotMode.NONE,
     HourMode.GRID_CHARGE: SlotMode.GRID_CHARGE,
@@ -60,8 +62,12 @@ def simulate(
         bus = 0.0  # + charging
         if st.mode is HourMode.SELL:
             lo = max(lo, p.min_sell_soc / 100 * cap)
-        charge_ok = p.max_grid_charge_price is None or h.buy <= p.max_grid_charge_price + 1e-9
-        if st.mode is HourMode.GRID_CHARGE and soc < target and charge_ok:
+        # the inverter charges from the grid whenever a grid-charge slot is active - it knows
+        # nothing about prices - so a merge that charges above the cap must be rejected
+        over_cap = p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9
+        if st.mode is HourMode.GRID_CHARGE and soc < target:
+            if over_cap:
+                cost += CAP_PENALTY
             e = min(target - soc, p.max_charge_kw * eta)
             bus = e / eta
         elif st.mode is HourMode.SELL and soc > lo:

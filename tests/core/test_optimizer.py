@@ -128,3 +128,19 @@ def test_min_sell_soc_floor():
     segs, _ = compress(r.hours, hrs, 60, replace(P, min_sell_soc=40))
     plan = to_day_plan(segs, hrs, replace(P, min_sell_soc=40))
     assert all(s.soc >= 40 for s in plan.slots if s.mode is SlotMode.SELL)
+
+
+def test_compress_never_grid_charges_above_price_cap():
+    """Regression: an expensive 'normal' hour must not be merged into a grid-charge slot."""
+    from dataclasses import replace
+    from core.optimizer import HourPlan
+    cap = replace(P, max_grid_charge_price=0.65)
+    # 20:00 is peak (1.45), the rest off-peak; alternate charge/sell to force many merges
+    buy = [1.45, 1.45, 1.45] + [0.65] * 21
+    sell = [2.0, 2.0, 0.3] + [0.8, 0.3] * 10 + [0.3]
+    hrs = day(buy, sell)
+    r = optimize(hrs, 70, cap, Strategy.MAX_GRID_TRADING, arbitrage=True)
+    segs, _ = compress(r.hours, hrs, 70, cap)
+    for s in segs:
+        if s.setting.mode is HourMode.GRID_CHARGE:
+            assert all(hrs[i].buy <= 0.65 for i in range(s.start, s.start + s.length)), s
