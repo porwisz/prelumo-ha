@@ -93,6 +93,18 @@ def simulate(
     return cost, traj
 
 
+_SLOT_TO_MODE = {v: k for k, v in _MODE_TO_SLOT.items()}
+
+
+def settings_from_plan(plan: DayPlan, hours: list[HourInput]) -> list[Setting]:
+    """What an existing inverter schedule does in each hour (slot active at the hour start)."""
+    out = []
+    for h in hours:
+        slot = plan.active_slot(h.start)
+        out.append(Setting(_SLOT_TO_MODE[slot.mode], slot.soc))
+    return out
+
+
 def _expand(segments: list[Segment]) -> list[Setting]:
     out: list[Setting] = []
     for s in segments:

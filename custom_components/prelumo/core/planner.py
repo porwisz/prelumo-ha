@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from .compress import Segment, compress, simulate, to_day_plan
+from .compress import Segment, compress, settings_from_plan, simulate, to_day_plan
 from .forecast.ev import EvForecast
 from .optimizer import BatteryParams, HourInput, OptimizeResult, Strategy, optimize, simulate_baseline
 from .plan import MAX_POWER_W, DayPlan, PlanError, Slot, SlotMode, parse_hhmm
@@ -35,6 +35,13 @@ class PlannerResult:
     baseline_cost: float
     missing_sell_hours: int
     notes: list[str] = field(default_factory=list)
+    current_plan_cost: float | None = None  # same forecast, schedule currently on the inverter
+
+    @property
+    def gain_vs_current(self) -> float | None:
+        if self.current_plan_cost is None:
+            return None
+        return self.current_plan_cost - self.slot_plan_cost
 
     @property
     def expected_savings(self) -> float:
@@ -91,9 +98,34 @@ def run_planner(
     slot_cost = simulate(day, [s.setting for s in segs for _ in range(s.length)], inp.soc, params)[0]
     base = simulate_baseline(day, inp.soc, params)
     notes = list(opt.notes)
+    cur_cost = None
+    if current is not None:
+        broken = plan_violations(current, day, params, strategy)
+        if broken:  # must be replaceable regardless of cost
+            notes.append("current_plan_violates:" + ",".join(broken))
+        else:
+            cur_cost = simulate(day, settings_from_plan(current, day), inp.soc, params)[0]
     if missing:
         notes.append(f"sell_price_missing_{missing}h")
-    return PlannerResult(plan, hin, opt, segs, slot_cost, base, missing, notes)
+    return PlannerResult(plan, hin, opt, segs, slot_cost, base, missing, notes, cur_cost)
+
+
+def plan_violations(
+    plan: DayPlan, hours: list[HourInput], params: BatteryParams, strategy: Strategy
+) -> list[str]:
+    """Rules an existing inverter schedule breaks under the current settings."""
+    out: set[str] = set()
+    for h in hours:
+        slot = plan.active_slot(h.start)
+        if slot.mode is SlotMode.SELL:
+            if strategy is Strategy.SELF_CONSUMPTION:
+                out.add("sell_in_self_consumption")
+            if slot.soc < params.min_sell_soc:
+                out.add("sell_below_min_soc")
+        if (slot.mode is SlotMode.GRID_CHARGE and params.max_grid_charge_price is not None
+                and h.buy > params.max_grid_charge_price + 1e-9):
+            out.add("grid_charge_above_price_cap")
+    return sorted(out)
 
 
 def parse_fallback_plan(text: str, power_w: int = MAX_POWER_W) -> DayPlan:

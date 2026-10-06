@@ -28,7 +28,7 @@ from .const import (
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_MAX_CHARGE_PRICE, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
+    OPT_MAX_CHARGE_PRICE, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
     STORAGE_VERSION, UPDATE_INTERVAL,
 )
 from .core.diff import WriteGuard, WritePolicy
@@ -123,7 +123,10 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
 
     def _policy(self) -> WritePolicy:
         o = self.opt
-        return WritePolicy(soc_tolerance=int(o[OPT_SOC_TOLERANCE]), max_writes_per_day=int(o[OPT_MAX_WRITES]))
+        return WritePolicy(
+            soc_tolerance=int(o[OPT_SOC_TOLERANCE]), max_writes_per_day=int(o[OPT_MAX_WRITES]),
+            min_gain=float(o[OPT_MIN_GAIN]),
+        )
 
     def battery_params(self) -> BatteryParams:
         o = self.opt
@@ -218,13 +221,18 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
 
     @callback
     def _maybe_recover(self, now: datetime) -> None:
-        """In fallback (e.g. sources not ready after a restart): re-plan as soon as they are back."""
+        """No plan yet, or on the backup plan: plan as soon as the inputs are available.
+
+        Does not rely on Home Assistant's "started" event alone - one slow integration can
+        hold startup for a long time.
+        """
         ps = self.plan_state
-        if not ps.fallback_active or self._plan_lock.locked():
+        no_plan = ps.computed_at is None
+        if not (ps.fallback_active or no_plan) or self._plan_lock.locked():
             return
         if self._last_recover and now - self._last_recover < timedelta(minutes=5):
             return
-        if "battery_soc" in ps.stale_sources and io.state_float(self.hass, self.inv.soc) is None:
+        if (no_plan or "battery_soc" in ps.stale_sources) and io.state_float(self.hass, self.inv.soc) is None:
             return
         self._last_recover = now
         self.config_entry.async_create_background_task(self.hass, self.async_replan(), f"{DOMAIN}_recover")
@@ -358,7 +366,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         ps.result, ps.proposed, ps.ev = result, result.plan, ev
         ps.pv, ps.load, ps.heat_pump = [pv[h] for h in hours], base, hp
         self.ledger.record_plan(now.date(), result.slot_plan_cost, result.baseline_cost)
-        await self._maybe_write(current, result.plan, now, force_write)
+        await self._maybe_write(current, result.plan, now, force_write, result.gain_vs_current)
 
     async def _ev_forecast(self, now: datetime, hours: list[datetime], base: list[float]) -> EvForecast:
         c, o = self.conf, self.opt
@@ -379,7 +387,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             default_target_soc=float(o[OPT_EV_DEFAULT_TARGET]),
         )
 
-    async def _maybe_write(self, current: DayPlan | None, new: DayPlan, now: datetime, force: bool) -> None:
+    async def _maybe_write(
+        self, current: DayPlan | None, new: DayPlan, now: datetime, force: bool, gain: float | None = None
+    ) -> None:
         ps = self.plan_state
         self.guard.policy = self._policy()
         if self.shadow and not force:
@@ -388,7 +398,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         if not self.auto_mode and not force:
             ps.write_decision = ["auto_mode_off"]
             return
-        ok, reasons = self.guard.decide(current, new, now)
+        ok, reasons = self.guard.decide(current, new, now, gain)
         if force and reasons != ["no_material_change"]:
             ok = True
         ps.write_decision = reasons

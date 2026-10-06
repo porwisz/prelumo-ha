@@ -15,6 +15,7 @@ class WritePolicy:
     power_tolerance_w: int = 500
     max_writes_per_day: int = 6
     min_interval: timedelta = timedelta(minutes=50)
+    min_gain: float = 0.5  # PLN per 24 h; smaller improvements are not worth a flash write
 
 
 def material_changes(
@@ -61,10 +62,14 @@ class WriteGuard:
     def record(self, now: datetime) -> None:
         self.history.append(now)
 
-    def decide(self, old: DayPlan | None, new: DayPlan, now: datetime) -> tuple[bool, list[str]]:
+    def decide(
+        self, old: DayPlan | None, new: DayPlan, now: datetime, gain: float | None = None
+    ) -> tuple[bool, list[str]]:
         reasons = material_changes(old, new, self.policy, now)
         if not reasons:
             return False, ["no_material_change"]
+        if old is not None and gain is not None and gain < self.policy.min_gain:
+            return False, ["gain_below_threshold", f"{gain:.2f}"]
         ok, why = self.allowed(now)
         if not ok:
             return False, [why or "blocked", *reasons]

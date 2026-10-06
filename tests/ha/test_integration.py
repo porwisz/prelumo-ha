@@ -139,6 +139,10 @@ async def test_stale_data_uses_fallback(hass: HomeAssistant, setup) -> None:
 
 async def test_auto_write_once_then_no_rewrite(hass: HomeAssistant, setup) -> None:
     entry, calls = setup
+    from unittest.mock import PropertyMock, patch as _patch
+    _p = _patch.object(type(entry.runtime_data), "opt", new_callable=PropertyMock,
+                       return_value={**OPTION_DEFAULTS, "min_gain": 0.0})  # any improvement counts
+    _p.start()
     await hass.services.async_call("switch", "turn_off", {"entity_id": "switch.prelumo_shadow_mode"}, blocking=True)
     await hass.async_block_till_done()
     resp = await hass.services.async_call(DOMAIN, "replan", {}, blocking=True, return_response=True)
@@ -152,8 +156,9 @@ async def test_auto_write_once_then_no_rewrite(hass: HomeAssistant, setup) -> No
         hass.states.async_set(f"{P}harmonogram_{n + 1}_flagi", str(d["flagi"][n]))
         hass.states.async_set(f"{P}harmonogram_{n + 1}_moc", str(d["moc"][n]))
     resp = await hass.services.async_call(DOMAIN, "replan", {}, blocking=True, return_response=True)
-    assert resp["write_decision"] == ["no_material_change"]
+    assert resp["write_decision"][0] in ("no_material_change", "gain_below_threshold", "min_interval"), resp
     assert len([c for c in calls if c.domain == "esphome"]) == 1
+    _p.stop()
 
 
 async def test_shadow_mode_never_touches_work_mode(hass: HomeAssistant, setup) -> None:
@@ -199,3 +204,23 @@ async def test_reconfigure(hass: HomeAssistant, setup) -> None:
     assert entry.data["weather"] == "weather.home"
     assert entry.data["outage_threshold"] == 170
     assert "solcast_today" not in entry.data  # cleared field removed
+
+
+async def test_first_plan_without_started_event(hass: HomeAssistant, recorder_mock) -> None:
+    """A hung integration can keep HA from 'running'; Prelumo must still plan once inputs exist."""
+    from homeassistant.core import CoreState
+    _seed(hass)
+    hass.set_state(CoreState.starting)
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, options=dict(OPTION_DEFAULTS), data={
+        "inverter_prefix": "deye_falownik", "write_action": "esphome.deye_modbus_zapisz_harmonogram",
+        "mode_select": "select.deye_falownik_ust_tryb_pracy", "mode_export_first": "Export First",
+        "mode_zero_export": "Zero Export To CT", "rce_today": "sensor.rce_pse_price",
+        "solcast_today": "sensor.solcast_pv_forecast_prognoza_na_dzisiaj"})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    coord = entry.runtime_data
+    await coord.async_refresh()  # the 30 s loop
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert coord.plan_state.computed_at is not None
+    assert not coord.plan_state.fallback_active

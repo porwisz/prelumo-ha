@@ -20,7 +20,7 @@ from .const import (
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_MAX_CHARGE_PRICE, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS,
+    OPT_MAX_CHARGE_PRICE, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS,
 )
 from .core.plan import PlanError
 from .core.planner import parse_fallback_plan
@@ -197,6 +197,7 @@ class PrelumoOptionsFlow(OptionsFlow):
             req(OPT_SOC_STEP): _num(1, 10, 1, "%"),
             req(OPT_MAX_WRITES): _num(1, 24, 1),
             req(OPT_SOC_TOLERANCE): _num(1, 50, 1, "%"),
+            req(OPT_MIN_GAIN): _num(0, 50, 0.1, "PLN"),
             req(OPT_STALE_HOURS): _num(1, 48, 1, "h"),
             req(OPT_FALLBACK_PLAN): selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
         })

@@ -144,3 +144,41 @@ def test_compress_never_grid_charges_above_price_cap():
     for s in segs:
         if s.setting.mode is HourMode.GRID_CHARGE:
             assert all(hrs[i].buy <= 0.65 for i in range(s.start, s.start + s.length)), s
+
+
+def test_write_guard_min_gain():
+    a = parse_fallback_plan("00:00 20 none; 05:00 80 grid_charge; 07:00 20; 13:00 20; 16:00 50 grid_charge; 21:00 20")
+    c = parse_fallback_plan("00:00 20 none; 05:00 80 grid_charge; 07:00 20; 13:00 20; 16:00 50 sell; 21:00 20")
+    g = WriteGuard(WritePolicy(min_gain=0.5))
+    assert g.decide(a, c, D0, gain=0.2) == (False, ["gain_below_threshold", "0.20"])
+    assert g.decide(a, c, D0, gain=1.0)[0]
+    assert g.decide(None, c, D0, gain=0.0)[0]  # nothing readable on the inverter -> write
+
+
+def test_current_plan_cost_and_gain():
+    from datetime import datetime as _dt
+    from core.forecast.ev import EvForecast
+    from core.planner import PlannerInputs, run_planner
+    from core.tariff import G13Tariff
+    now = _dt(2026, 10, 5, 14, 0)
+    hours = [now + timedelta(hours=i) for i in range(36)]
+    inp = PlannerInputs(now, 50, {h: (3.0 if 9 <= h.hour < 15 else 0.0) for h in hours}, [0.6] * 36,
+                        [0.4] * 36, EvForecast([0.0] * 36, [], [False] * 36),
+                        {h: (1.5 if h.hour in (18, 19) else 0.3) for h in hours}, G13Tariff(1.0, 1.4, 0.6))
+    first = run_planner(inp, P, Strategy.MAX_GRID_TRADING, arbitrage=False)
+    again = run_planner(inp, P, Strategy.MAX_GRID_TRADING, arbitrage=False, current=first.plan)
+    assert abs(again.gain_vs_current) < 0.01  # re-planning onto itself gains nothing
+    worse = parse_fallback_plan("00:00 10 none; 05:00 10; 07:00 10; 13:00 10; 16:00 10; 21:00 10")
+    vs_worse = run_planner(inp, P, Strategy.MAX_GRID_TRADING, arbitrage=False, current=worse)
+    assert vs_worse.gain_vs_current > 0.5
+
+
+def test_plan_violations():
+    from dataclasses import replace
+    from core.planner import plan_violations
+    hrs = day(G13_BUY, FLAT_SELL)
+    p = parse_fallback_plan("00:00 20; 05:00 80 grid_charge; 08:00 20; 13:00 20; 18:00 10 sell; 21:00 20")
+    v = plan_violations(p, hrs, replace(P, max_grid_charge_price=0.65, min_sell_soc=20), Strategy.SELF_CONSUMPTION)
+    assert v == ["grid_charge_above_price_cap", "sell_below_min_soc", "sell_in_self_consumption"]
+    ok = parse_fallback_plan("00:00 20; 01:00 80 grid_charge; 06:00 20; 13:00 20; 18:00 20; 21:00 20")
+    assert plan_violations(ok, hrs, replace(P, max_grid_charge_price=0.65), Strategy.SELF_CONSUMPTION) == []

@@ -63,6 +63,8 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "hourly": [h.as_dict() for h in r.optimum.hours] if r else None,
         "expected_cost": round(r.slot_plan_cost, 2) if r else None,
         "baseline_cost": round(r.baseline_cost, 2) if r else None,
+        "current_plan_cost": round(r.current_plan_cost, 2) if r and r.current_plan_cost is not None else None,
+        "gain_vs_current": round(r.gain_vs_current, 2) if r and r.gain_vs_current is not None else None,
         "notes": r.notes if r else None,
         "write_decision": ps.write_decision,
         "last_write": ps.last_write.isoformat() if ps.last_write else None,

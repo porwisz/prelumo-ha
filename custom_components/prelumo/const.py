@@ -84,6 +84,7 @@ OPT_FALLBACK_PLAN: Final = "fallback_plan"
 OPT_STALE_HOURS: Final = "stale_hours"
 OPT_MAX_CHARGE_PRICE: Final = "max_grid_charge_price"
 OPT_MIN_SELL_SOC: Final = "min_sell_soc"
+OPT_MIN_GAIN: Final = "min_gain"
 
 OPTION_DEFAULTS: Final = {
     OPT_CAPACITY: 20.0,
@@ -114,6 +115,7 @@ OPTION_DEFAULTS: Final = {
     OPT_STALE_HOURS: 6,
     OPT_MAX_CHARGE_PRICE: 0.0,  # 0 = lowest G13 price
     OPT_MIN_SELL_SOC: 20,
+    OPT_MIN_GAIN: 0.5,
 }
 
 # --- runtime switches / select (restored state) ------------------------
