@@ -35,11 +35,35 @@ class Segment:
     setting: Setting
 
 
-def hour_setting(h: HourPlan) -> Setting:
+def stored_energy_value(plan: list[HourPlan], hours: list[HourInput], i: int, p: BatteryParams) -> float:
+    """What 1 kWh kept in the battery after hour ``i`` is worth later (PLN, at the AC side).
+
+    Looks ahead until the next grid-charge hour (after that the battery is refilled cheaply):
+    a later Sell hour is worth its sell price, any other later hour is worth the buy price it
+    displaces. Beyond the horizon: the cheapest buy price (energy left for tomorrow).
+    """
+    best = 0.0
+    for k in range(i + 1, len(plan)):
+        if plan[k].mode is HourMode.GRID_CHARGE:
+            return best * p.eta
+        h = hours[k]
+        best = max(best, h.sell if plan[k].mode is HourMode.SELL else h.buy)
+    return max(best, min((h.buy for h in hours), default=0.0)) * p.eta
+
+
+def hour_setting(
+    h: HourPlan, hour: HourInput | None = None, keep_value: float | None = None,
+    p: BatteryParams | None = None,
+) -> Setting:
     if h.mode is HourMode.GRID_CHARGE:
         return Setting(h.mode, h.soc_end)
     if h.mode is HourMode.SELL:
         return Setting(h.mode, h.soc_end)
+    if hour is not None and keep_value is not None and p is not None and hour.buy >= keep_value:
+        # grid power now costs more than the stored energy will ever earn: never import while
+        # the battery has energy - floor at min SoC, not at the forecast trajectory (a higher
+        # real load would otherwise be bought at this price)
+        return Setting(HourMode.NORMAL, p.min_soc)
     return Setting(HourMode.NORMAL, h.soc_floor)
 
 
@@ -133,7 +157,7 @@ def compress(
     plan, hours = plan[:n], hours[:n]
     segs: list[Segment] = []
     for i, hp in enumerate(plan):
-        st = hour_setting(hp)
+        st = hour_setting(hp, hours[i], stored_energy_value(plan, hours, i, params), params)
         if segs and segs[-1].setting == st:
             segs[-1].length += 1
         else:

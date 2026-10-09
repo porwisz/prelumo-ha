@@ -198,3 +198,28 @@ def test_grid_charge_slot_never_covers_expensive_hour_even_if_battery_full():
     assert full > 5e3  # penalised although nothing is imported at 1.45
     ok = simulate(hrs, [Setting(HourMode.GRID_CHARGE, 100), Setting(HourMode.NORMAL, 100)], 100, cap)[0]
     assert ok < 1e3
+
+
+def test_expensive_hour_battery_covers_house_down_to_min_soc():
+    """Regression (user report): 17:00 at 1.45 PLN got floor 98% because the forecast load was
+    tiny; a higher real load would be bought at peak while the energy was sold at 0.86 at 18:00.
+    """
+    from core.compress import Setting, hour_setting, stored_energy_value
+    from core.optimizer import HourPlan
+    hrs = day([0.65, 1.45, 1.45, 1.45], [0.5, 0.71, 0.86, 0.85], load=[0.2, 0.4, 0.5, 0.5])
+    plan = [
+        HourPlan(hrs[0].start, 90, 100, HourMode.GRID_CHARGE, 2, 0, 2, 0, 1.3),
+        HourPlan(hrs[1].start, 100, 98, HourMode.NORMAL, 0, 0, 0, 0, 0),
+        HourPlan(hrs[2].start, 98, 50, HourMode.SELL, 0, 9, 0, 9, -7),
+        HourPlan(hrs[3].start, 50, 24, HourMode.SELL, 0, 4, 0, 4, -3),
+    ]
+    v = stored_energy_value(plan, hrs, 1, P)
+    assert v < 1.45  # selling later earns 0.86 at most
+    assert hour_setting(plan[1], hrs[1], v, P) == Setting(HourMode.NORMAL, P.min_soc)
+    # cheap now, expensive later -> holding is right, keep the trajectory floor
+    cheap = day([0.65, 0.65, 1.45], [0.3, 0.3, 0.3])
+    hold = [HourPlan(cheap[0].start, 80, 80, HourMode.NORMAL, 0.2, 0, 0, 0, 0.1),
+            HourPlan(cheap[1].start, 80, 80, HourMode.NORMAL, 0.2, 0, 0, 0, 0.1),
+            HourPlan(cheap[2].start, 80, 60, HourMode.NORMAL, 0, 0, 0, 0, 0)]
+    v2 = stored_energy_value(hold, cheap, 0, P)
+    assert hour_setting(hold[0], cheap[0], v2, P) == Setting(HourMode.NORMAL, 80)
