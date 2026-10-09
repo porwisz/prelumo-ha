@@ -182,3 +182,19 @@ def test_plan_violations():
     assert v == ["grid_charge_above_price_cap", "sell_below_min_soc", "sell_in_self_consumption"]
     ok = parse_fallback_plan("00:00 20; 01:00 80 grid_charge; 06:00 20; 13:00 20; 18:00 20; 21:00 20")
     assert plan_violations(ok, hrs, replace(P, max_grid_charge_price=0.65), Strategy.SELF_CONSUMPTION) == []
+
+
+def test_grid_charge_slot_never_covers_expensive_hour_even_if_battery_full():
+    """Regression (user report): slot 15-17 'grid charge to 100%' covered the 16:00 peak hour.
+
+    The forecast said the battery is full by 16:00, so no grid import was simulated - but if
+    the forecast is off, the inverter charges at peak price. The cap is a hard rule.
+    """
+    from dataclasses import replace
+    from core.compress import Setting, simulate
+    cap = replace(P, max_grid_charge_price=0.65)
+    hrs = day([0.65, 1.45], [0.3, 0.3], pv=[0, 2], load=[0, 0])
+    full = simulate(hrs, [Setting(HourMode.GRID_CHARGE, 100)] * 2, 100, cap)[0]
+    assert full > 5e3  # penalised although nothing is imported at 1.45
+    ok = simulate(hrs, [Setting(HourMode.GRID_CHARGE, 100), Setting(HourMode.NORMAL, 100)], 100, cap)[0]
+    assert ok < 1e3

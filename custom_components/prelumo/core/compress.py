@@ -65,9 +65,11 @@ def simulate(
         # the inverter charges from the grid whenever a grid-charge slot is active - it knows
         # nothing about prices - so a merge that charges above the cap must be rejected
         over_cap = p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9
+        if st.mode is HourMode.GRID_CHARGE and over_cap:
+            # hard rule, independent of the forecast: if the battery is lower than predicted,
+            # the inverter would charge from the grid at this price (and the house runs on grid)
+            cost += CAP_PENALTY
         if st.mode is HourMode.GRID_CHARGE and soc < target:
-            if over_cap:
-                cost += CAP_PENALTY
             e = min(target - soc, p.max_charge_kw * eta)
             bus = e / eta
         elif st.mode is HourMode.SELL and soc > lo:
