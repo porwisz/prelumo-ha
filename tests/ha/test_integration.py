@@ -224,3 +224,18 @@ async def test_first_plan_without_started_event(hass: HomeAssistant, recorder_mo
     await hass.async_block_till_done(wait_background_tasks=True)
     assert coord.plan_state.computed_at is not None
     assert not coord.plan_state.fallback_active
+
+
+async def test_full_charge_monitoring(hass: HomeAssistant, setup) -> None:
+    entry, _ = setup
+    coord = entry.runtime_data
+    assert hass.states.get("binary_sensor.prelumo_full_charge_due").state == "on"  # never full yet
+    assert coord.battery_params().max_soc == 100 and coord.battery_params().require_full
+    hass.states.async_set(f"{P}bateria_soc", "100")
+    await coord.async_refresh()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert coord.full.last_full is not None
+    assert hass.states.get("binary_sensor.prelumo_full_charge_due").state == "off"
+    assert coord.battery_params().max_soc == 98 and not coord.battery_params().require_full
+    st = hass.states.get("sensor.prelumo_last_full_charge")
+    assert st.attributes["interval_days"] == 7 and st.attributes["due"] is False

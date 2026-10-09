@@ -12,6 +12,7 @@ from homeassistant.components.sensor import (
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from . import PrelumoConfigEntry
 from .coordinator import PrelumoCoordinator
@@ -104,6 +105,18 @@ SENSORS: tuple[PrelumoSensorDescription, ...] = (
         state_class=SensorStateClass.TOTAL,
         value=lambda c: c.ledger.total_expected_savings(),
         attrs=lambda c: {"days": c.ledger.days},
+    ),
+    PrelumoSensorDescription(
+        key="last_full_charge", device_class=SensorDeviceClass.TIMESTAMP,
+        value=lambda c: c.full.last_full,
+        attrs=lambda c: {
+            "days_since": c.full.days_since(dt_util.now()),
+            "interval_days": c.full.interval_days,
+            "next_due": c.full.next_due().isoformat() if c.full.next_due() else None,
+            "due": c.full.due(dt_util.now()),
+            "planned": bool(c.plan_state.result and "full_charge_planned" in c.plan_state.result.notes),
+            "max_charge_soc": int(c.opt["max_charge_soc"]),
+        },
     ),
     PrelumoSensorDescription(
         key="ev_energy_needed", native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,

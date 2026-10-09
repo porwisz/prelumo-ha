@@ -28,9 +28,10 @@ from .const import (
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_MAX_CHARGE_PRICE, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
+    OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
     STORAGE_VERSION, UPDATE_INTERVAL,
 )
+from .core.balance import FULL_SOC, FullChargeTracker
 from .core.diff import WriteGuard, WritePolicy
 from .core.forecast.ev import CarState, EvForecast, EvPattern, forecast_ev
 from .core.forecast.heatpump import HeatPumpModel
@@ -108,6 +109,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.load_profile = LoadProfile()
         self.hp_model = HeatPumpModel()
         self.last_learn: str | None = None
+        self.full = FullChargeTracker(int(self.opt[OPT_FULL_CHARGE_DAYS]))
         self.guard = WriteGuard(self._policy())
         self._plan_lock = asyncio.Lock()
         self._yesterday_pv_forecast: dict[datetime, float] = {}
@@ -128,10 +130,17 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             min_gain=float(o[OPT_MIN_GAIN]),
         )
 
+    def full_charge_due(self) -> bool:
+        return self.full.due(dt_util.now())
+
     def battery_params(self) -> BatteryParams:
         o = self.opt
+        due = self.full_charge_due()
+        # everyday limit (last % charge slowly); full charge only when the periodic one is due
+        max_soc = int(o[OPT_MAX_SOC]) if due else min(int(o[OPT_MAX_SOC]), int(o[OPT_MAX_CHARGE_SOC]))
         return BatteryParams(
-            capacity_kwh=float(o[OPT_CAPACITY]), min_soc=int(o[OPT_MIN_SOC]), max_soc=int(o[OPT_MAX_SOC]),
+            capacity_kwh=float(o[OPT_CAPACITY]), min_soc=int(o[OPT_MIN_SOC]), max_soc=max_soc,
+            require_full=due,
             max_charge_kw=float(o[OPT_MAX_CHARGE]), max_discharge_kw=float(o[OPT_MAX_DISCHARGE]),
             roundtrip_efficiency=float(o[OPT_EFFICIENCY]), wear_cost=float(o[OPT_WEAR]),
             grid_import_kw=float(o[OPT_GRID_IMPORT]), grid_export_kw=float(o[OPT_GRID_EXPORT]),
@@ -169,6 +178,16 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.ledger = ShadowLedger.from_dict(stored.get("shadow"))
         self.last_learn = stored.get("last_learn")
         self.guard.history = [dt for t in stored.get("writes", []) if (dt := dt_util.parse_datetime(t))]
+        if stored.get("last_full"):
+            self.full.last_full = dt_util.parse_datetime(stored["last_full"])
+        if self.full.last_full is None:  # first run: look it up in the SoC history
+            end = dt_util.now()
+            try:
+                self.full.last_full = await io.last_hour_at_or_above(
+                    self.hass, self.inv.soc, FULL_SOC, end - timedelta(days=60), end
+                )
+            except Exception as err:  # noqa: BLE001 - recorder may not be ready
+                _LOGGER.debug("Full-charge history lookup failed: %s", err)
         self._unsub.append(
             async_track_time_change(self.hass, self._hourly, minute=PLAN_MINUTE, second=0)
         )
@@ -188,6 +207,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 "shadow": self.ledger.to_dict(),
                 "last_learn": self.last_learn,
                 "writes": [t.isoformat() for t in self.guard.history],
+                "last_full": self.full.last_full.isoformat() if self.full.last_full else None,
             },
             5,
         )
@@ -198,6 +218,13 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         plan = io.read_current_plan(self.hass, self.inv)
         outage = io.is_outage(self.hass, self.conf.get(CONF_OUTAGE_ENTITY), float(self.conf[CONF_OUTAGE_THRESHOLD]))
         data = PrelumoData(current_plan=plan, outage=outage, soc=io.state_float(self.hass, self.inv.soc))
+        was_due = self.full.due(now)
+        if self.full.observe(data.soc, now):
+            self._save()
+            if was_due:  # balancing done -> back to the everyday limit at once
+                self.config_entry.async_create_background_task(
+                    self.hass, self.async_replan(), f"{DOMAIN}_after_full_charge"
+                )
         self._maybe_recover(now)
         if plan is not None:
             data.active_index = plan.active_index(now)

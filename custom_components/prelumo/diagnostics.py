@@ -62,6 +62,12 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Prelumo
                  "source": n.source, "probability": n.probability} for n in ps.ev.needs
             ],
         } if ps.ev else None,
+        "full_charge": {
+            "last_full": c.full.last_full.isoformat() if c.full.last_full else None,
+            "interval_days": c.full.interval_days,
+            "due": c.full_charge_due(),
+            "max_soc_used": c.battery_params().max_soc,
+        },
         "shadow_ledger": c.ledger.to_dict(),
         "write_history": [t.isoformat() for t in c.guard.history],
     }

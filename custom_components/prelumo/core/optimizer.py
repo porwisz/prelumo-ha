@@ -19,6 +19,7 @@ from enum import StrEnum
 
 EPS = 0.05  # kWh
 INFEASIBLE = 1e6
+FULL_CHARGE_PENALTY = 1e3  # PLN; a due full charge is done whenever it is possible at all
 
 
 class Strategy(StrEnum):
@@ -46,6 +47,7 @@ class BatteryParams:
     soc_step: int = 2
     max_grid_charge_price: float | None = None  # PLN/kWh; no grid charging above it (None = no limit)
     min_sell_soc: int = 20  # %; battery never exports below this SoC
+    require_full: bool = False  # periodic 100% charge due: plan must reach max_soc once
 
     @property
     def eta(self) -> float:
@@ -181,12 +183,21 @@ def optimize(
         return -(s - lo) / 100 * p.capacity_kwh * terminal_price
 
     T = len(hours)
-    # V[t][(s, tainted)]
-    V: list[dict[tuple[int, bool], float]] = [dict() for _ in range(T + 1)]
-    choice: list[dict[tuple[int, bool], tuple[int, bool, _Step]]] = [dict() for _ in range(T)]
-    for s in grid:
+    # State = (soc, holds grid energy, has reached full). The "full" flag is only tracked when a
+    # periodic full charge (BMS balancing) is required; otherwise it stays True.
+    track_full = p.require_full
+    full_at = hi
+
+    def done(s: int) -> bool:
+        return (not track_full) or s >= full_at
+
+    V: list[dict[tuple[int, bool, bool], float]] = [dict() for _ in range(T + 1)]
+    choice: list[dict[tuple[int, bool, bool], tuple[int, bool, bool, _Step]]] = [dict() for _ in range(T)]
+    fulls = (False, True) if track_full else (True,)
+    for s_ in grid:
         for tainted in (False, True):
-            V[T][(s, tainted)] = term(s)
+            for full in fulls:
+                V[T][(s_, tainted, full)] = term(s_) + (0.0 if full else FULL_CHARGE_PENALTY)
 
     for t in range(T - 1, -1, -1):
         h = hours[t]
@@ -195,40 +206,44 @@ def optimize(
             for tainted in (False, True):
                 if t == 0 and tainted:
                     continue
-                may_export = arbitrage or not tainted
-                best = None
-                for s1 in grid:
-                    st = _transition(p, h, s0, s1, strategy, may_export)
-                    if st is None:
+                for full in fulls:
+                    if t == 0 and full != done(start_soc):
                         continue
-                    nt = tainted or st.grid_charge > EPS
-                    if s1 <= lo:
-                        nt = False
-                    if arbitrage:
-                        nt = False
-                    v = st.cost + V[t + 1][(s1, nt)]
-                    if best is None or v < best[0]:
-                        best = (v, s1, nt, st)
-                if best is None:  # should not happen: idle is always allowed unless limits
-                    best = (INFEASIBLE, s0, tainted, _Step(INFEASIBLE, 0, 0, 0, 0))
-                V[t][(s0, tainted)] = best[0]
-                choice[t][(s0, tainted)] = (best[1], best[2], best[3])
+                    may_export = arbitrage or not tainted
+                    best = None
+                    for s1 in grid:
+                        st = _transition(p, h, s0, s1, strategy, may_export)
+                        if st is None:
+                            continue
+                        nt = tainted or st.grid_charge > EPS
+                        if s1 <= lo or arbitrage:
+                            nt = False
+                        nf = full or done(s1)
+                        v = st.cost + V[t + 1][(s1, nt, nf)]
+                        if best is None or v < best[0]:
+                            best = (v, s1, nt, nf, st)
+                    if best is None:  # should not happen: idle is always allowed unless limits
+                        best = (INFEASIBLE, s0, tainted, full, _Step(INFEASIBLE, 0, 0, 0, 0))
+                    V[t][(s0, tainted, full)] = best[0]
+                    choice[t][(s0, tainted, full)] = (best[1], best[2], best[3], best[4])
 
     plan: list[HourPlan] = []
-    s, tainted = start_soc, False
+    s_, tainted, full = start_soc, False, done(start_soc)
     total = 0.0
     for t in range(T):
-        s1, nt, st = choice[t][(s, tainted)]
+        s1, nt, nf, st = choice[t][(s_, tainted, full)]
         plan.append(
-            HourPlan(hours[t].start, s, s1, _mode(st), st.grid_import, st.grid_export,
+            HourPlan(hours[t].start, s_, s1, _mode(st), st.grid_import, st.grid_export,
                      st.grid_charge, st.battery_export, st.cost)
         )
         total += st.cost
-        s, tainted = s1, nt
+        s_, tainted, full = s1, nt, nf
     notes = []
     if total >= INFEASIBLE:
         notes.append("grid_import_limit_exceeded")
-    return OptimizeResult(plan, total, -term(s), strategy, arbitrage, notes)
+    if track_full:
+        notes.append("full_charge_planned" if full else "full_charge_not_possible_in_horizon")
+    return OptimizeResult(plan, total, -term(s_), strategy, arbitrage, notes)
 
 
 def simulate_baseline(hours: list[HourInput], soc_now: float, params: BatteryParams) -> float:

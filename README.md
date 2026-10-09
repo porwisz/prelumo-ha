@@ -40,6 +40,16 @@ Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo 
 - **Min. SoC przy sprzedaży** (domyślnie 20%) — bateria nie sprzedaje do sieci poniżej tego poziomu;
   slot Sell nigdy nie dostaje niższego progu.
 
+### Ładowanie do pełna
+
+- **Maks. ładowanie na co dzień** (domyślnie 98%) — ostatnie procenty ładują się długo, więc
+  na co dzień plan i sloty ładowania z sieci kończą na tym poziomie.
+- **Pełne ładowanie co N dni** (domyślnie 7, 0 = wył.) — gdy od ostatnich 100% minęło N dni,
+  Prelumo planuje jedno ładowanie do 100% (balansowanie BMS) najtańszym dozwolonym sposobem
+  (PV, tanie godziny; limit ceny obowiązuje). Monitorowanie: `sensor.prelumo_last_full_charge`
+  (data ostatnich 100%, `days_since`, `next_due`, `planned`) i `binary_sensor.prelumo_full_charge_due`.
+  Ostatnie 100% Prelumo odczytuje z historii SoC przy starcie i na bieżąco z falownika.
+
 ### Strategie
 - **Autokonsumpcja** — bateria nigdy nie oddaje do sieci; może ładować się z sieci w strefie
   pozaszczytowej, jeśli to obniża koszt.

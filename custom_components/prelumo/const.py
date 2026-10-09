@@ -85,6 +85,8 @@ OPT_STALE_HOURS: Final = "stale_hours"
 OPT_MAX_CHARGE_PRICE: Final = "max_grid_charge_price"
 OPT_MIN_SELL_SOC: Final = "min_sell_soc"
 OPT_MIN_GAIN: Final = "min_gain"
+OPT_MAX_CHARGE_SOC: Final = "max_charge_soc"
+OPT_FULL_CHARGE_DAYS: Final = "full_charge_days"
 
 OPTION_DEFAULTS: Final = {
     OPT_CAPACITY: 20.0,
@@ -116,6 +118,8 @@ OPTION_DEFAULTS: Final = {
     OPT_MAX_CHARGE_PRICE: 0.0,  # 0 = lowest G13 price
     OPT_MIN_SELL_SOC: 20,
     OPT_MIN_GAIN: 0.5,
+    OPT_MAX_CHARGE_SOC: 98,  # everyday charge limit; the last % charge slowly
+    OPT_FULL_CHARGE_DAYS: 7,  # full 100 % charge every N days (BMS balancing), 0 = off
 }
 
 # --- runtime switches / select (restored state) ------------------------

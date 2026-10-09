@@ -18,7 +18,10 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: PrelumoConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
     c = entry.runtime_data
-    async_add_entities([SellNow(c, "sell_now"), GridOutage(c, "grid_outage"), FallbackActive(c, "fallback_active")])
+    async_add_entities([
+        SellNow(c, "sell_now"), GridOutage(c, "grid_outage"), FallbackActive(c, "fallback_active"),
+        FullChargeDue(c, "full_charge_due"),
+    ])
 
 
 class SellNow(PrelumoEntity, BinarySensorEntity):
@@ -45,3 +48,11 @@ class FallbackActive(PrelumoEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         return {"stale_sources": self.coordinator.plan_state.stale_sources}
+
+
+class FullChargeDue(PrelumoEntity, BinarySensorEntity):
+    """On while the periodic 100 % charge is due (Prelumo then plans it)."""
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.full_charge_due()

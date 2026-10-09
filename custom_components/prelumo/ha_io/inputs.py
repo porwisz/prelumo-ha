@@ -224,6 +224,23 @@ async def hourly_kwh(
     return out
 
 
+async def last_hour_at_or_above(
+    hass: HomeAssistant, entity_id: str, threshold: float, start: datetime, end: datetime
+) -> datetime | None:
+    """End of the latest hour whose maximum reached ``threshold`` (long-term statistics)."""
+    if not hass.states.get(entity_id):
+        return None
+    stats = await get_instance(hass).async_add_executor_job(
+        statistics_during_period, hass, start, end, {entity_id}, "hour", None, {"max"}
+    )
+    last = None
+    for r in stats.get(entity_id, []):
+        if r.get("max") is not None and float(r["max"]) >= threshold:
+            ts = r["start"]
+            last = dt_util.as_local(dt_util.utc_from_timestamp(ts) if isinstance(ts, (int, float)) else ts)
+    return last + timedelta(hours=1) if last else None
+
+
 async def hourly_energy_change(
     hass: HomeAssistant, entity_id: str, start: datetime, end: datetime
 ) -> dict[datetime, float]:

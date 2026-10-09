@@ -20,7 +20,7 @@ from .const import (
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_MAX_CHARGE_PRICE, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS,
+    OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS,
 )
 from .core.plan import PlanError
 from .core.planner import parse_fallback_plan
@@ -174,6 +174,8 @@ class PrelumoOptionsFlow(OptionsFlow):
             req(OPT_CAPACITY): _num(1, 200, 0.1, "kWh"),
             req(OPT_MIN_SOC): _num(0, 100, 1, "%"),
             req(OPT_MAX_SOC): _num(0, 100, 1, "%"),
+            req(OPT_MAX_CHARGE_SOC): _num(50, 100, 1, "%"),
+            req(OPT_FULL_CHARGE_DAYS): _num(0, 60, 1, "d"),
             req(OPT_MAX_CHARGE): _num(0.5, 30, 0.1, "kW"),
             req(OPT_MAX_DISCHARGE): _num(0.5, 30, 0.1, "kW"),
             req(OPT_EFFICIENCY): _num(0.5, 1, 0.01),

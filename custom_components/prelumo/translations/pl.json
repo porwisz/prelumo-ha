@@ -110,13 +110,17 @@
           "fallback_plan": "Plan awaryjny",
           "max_grid_charge_price": "Maks. cena ładowania z sieci",
           "min_sell_soc": "Min. SoC przy sprzedaży",
-          "min_gain": "Min. zysk do zapisu planu"
+          "min_gain": "Min. zysk do zapisu planu",
+          "max_charge_soc": "Maks. ładowanie na co dzień",
+          "full_charge_days": "Pełne ładowanie co (dni)"
         },
         "data_description": {
           "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell",
           "max_grid_charge_price": "Bateria ładuje się z sieci tylko gdy cena zakupu ≤ tej wartości. 0 = najniższa cena z taryfy G13.",
           "min_sell_soc": "Bateria nie sprzedaje do sieci poniżej tego poziomu.",
-          "min_gain": "Nowy plan trafia do falownika tylko, gdy jest tańszy od obecnego o co najmniej tyle zł na 24 h."
+          "min_gain": "Nowy plan trafia do falownika tylko, gdy jest tańszy od obecnego o co najmniej tyle zł na 24 h.",
+          "max_charge_soc": "Na co dzień Prelumo planuje baterię najwyżej do tego poziomu (ostatnie % ładują się długo).",
+          "full_charge_days": "Co N dni Prelumo planuje jedno ładowanie do 100% (balansowanie BMS), najtańszym dozwolonym sposobem. 0 = wyłączone."
         }
       }
     },
@@ -161,6 +165,9 @@
       },
       "pv_forecast_corrected": {
         "name": "Skorygowana prognoza PV (24 h)"
+      },
+      "last_full_charge": {
+        "name": "Ostatnie pełne ładowanie"
       }
     },
     "binary_sensor": {
@@ -172,6 +179,9 @@
       },
       "fallback_active": {
         "name": "Plan awaryjny aktywny"
+      },
+      "full_charge_due": {
+        "name": "Pełne ładowanie należne"
       }
     },
     "select": {

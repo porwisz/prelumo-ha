@@ -110,13 +110,17 @@
           "fallback_plan": "Backup plan",
           "max_grid_charge_price": "Max price for grid charging",
           "min_sell_soc": "Min SoC when selling",
-          "min_gain": "Min gain to write a plan"
+          "min_gain": "Min gain to write a plan",
+          "max_charge_soc": "Everyday max charge",
+          "full_charge_days": "Full charge every (days)"
         },
         "data_description": {
           "fallback_plan": "6 entries 'HH:MM SOC MODE' separated by ';', mode: none | grid_charge | sell",
           "max_grid_charge_price": "The battery charges from the grid only when the buy price is at or below this. 0 = lowest G13 price.",
           "min_sell_soc": "The battery never sells to the grid below this level.",
-          "min_gain": "A new plan is written only if it is cheaper than the inverter's current schedule by at least this much per 24 h."
+          "min_gain": "A new plan is written only if it is cheaper than the inverter's current schedule by at least this much per 24 h.",
+          "max_charge_soc": "Prelumo plans the battery up to this level on normal days (the last % charge slowly).",
+          "full_charge_days": "Every N days Prelumo plans one charge to 100 % (BMS balancing), in the cheapest allowed way. 0 = off."
         }
       }
     },
@@ -161,6 +165,9 @@
       },
       "pv_forecast_corrected": {
         "name": "Corrected PV forecast (24 h)"
+      },
+      "last_full_charge": {
+        "name": "Last full charge"
       }
     },
     "binary_sensor": {
@@ -172,6 +179,9 @@
       },
       "fallback_active": {
         "name": "Backup plan active"
+      },
+      "full_charge_due": {
+        "name": "Full charge due"
       }
     },
     "select": {
