@@ -294,7 +294,8 @@ def test_reserve_for_expensive_hours_after_selling():
                 battery_first_above=0.63, reserve_margin=0.3)
     res = expensive_reserve(hrs, p)
     assert res[2] > 3.0 * 1.3  # after 19:00: 20:00 needs 3 kWh + 30 %
-    assert res[3] == 0.0 and res[0] > res[2]
+    assert res[3] > 3.0 * 1.3  # 20:00 itself: a sell slot drains in minutes
+    assert res[4] == 0.0 and res[0] > res[2]
     r = optimize(hrs, 90, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
     assert r.hours[3].grid_import < 0.06, r.hours[3]  # 20:00 covered by the battery
     assert any(h.battery_export > 1 for h in r.hours[1:3])  # still sells the surplus

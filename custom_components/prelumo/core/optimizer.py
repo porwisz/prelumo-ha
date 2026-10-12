@@ -118,17 +118,23 @@ class _Step:
 
 
 def expensive_reserve(hours: list[HourInput], p: BatteryParams) -> list[float]:
-    """Battery-side kWh to keep after each hour for the house in the following expensive hours."""
+    """Battery-side kWh to keep while selling in each hour for the house in the expensive hours.
+
+    Covers the following expensive hours and, in an expensive hour, that hour itself: a sell
+    slot exports at full power and reaches its floor within minutes, so the rest of the hour
+    would run on the grid at the expensive price unless the floor keeps this hour's need too.
+    """
     out = [0.0] * len(hours)
     if p.battery_first_above is None:
         return out
     acc = 0.0
     for t in range(len(hours) - 1, -1, -1):
-        out[t] = acc * (1 + p.reserve_margin) / p.eta
         h = hours[t]
         if h.buy > p.battery_first_above + 1e-9:
             acc += max(0.0, h.load - h.pv)  # house + heat pump, without the EV
+            out[t] = acc * (1 + p.reserve_margin) / p.eta
         else:
+            out[t] = acc * (1 + p.reserve_margin) / p.eta
             acc = 0.0  # a cheap hour ends the expensive run
     return out
 
