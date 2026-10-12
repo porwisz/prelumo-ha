@@ -175,8 +175,9 @@ def simulate(
             rate = min(run_kw, p.grid_export_kw + net)
             tau = min(1.0, -bus / rate) if rate > 0 else 0.0
             shift = net * (1.0 - tau)
-            if expensive and shift > 0.05:
-                # hard rule (battery first): the sell slot hits its floor and the house buys here
+            if shift > 0.05:
+                # hard rule: a sell slot never exports and then buys within the same hour - it
+                # would hit its floor early and leave the house on the grid for the rest
                 cost += CAP_PENALTY
             imp += shift
             exp += shift

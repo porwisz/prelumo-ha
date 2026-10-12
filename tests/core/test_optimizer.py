@@ -416,3 +416,16 @@ def test_arbitrage_needs_min_margin():
     big = day(buy, [0.6, 0.6, 1.8, 0.6], load=[0.5] * 4)
     r = optimize(big, 20, replace(p, arbitrage_min_margin=0.5), Strategy.MAX_GRID_TRADING, arbitrage=True)
     assert any(h.battery_export > 1 for h in r.hours)
+
+
+def test_sell_slot_never_exports_and_imports_in_one_hour():
+    """Regression (user report): a sell slot at a cheap hour sold to its floor, then the house
+    bought for the rest of the hour - selling and buying in the same slot makes no sense."""
+    from dataclasses import replace
+    from core.compress import Setting, simulate
+    hrs = day([0.63, 0.63], [0.93, 0.8], load=[2.0, 0.5])
+    p = replace(P, max_soc=98, min_sell_soc=20)
+    detail: list[dict] = []
+    cost, _ = simulate(hrs, [Setting(HourMode.SELL, 20, 10.0), Setting(HourMode.NORMAL, 20)], 26, p,
+                       detail=detail)
+    assert detail[0]["import"] > 0.05 and detail[0]["export"] > 0.05 and cost > 5e3
