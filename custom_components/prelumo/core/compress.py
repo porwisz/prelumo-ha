@@ -109,6 +109,9 @@ def simulate(
         bus = 0.0  # + charging
         if st.mode is HourMode.SELL:
             lo = max(lo, p.min_sell_soc / 100 * cap)
+            if h.sell <= 0:
+                # hard rule: no Export First where the RCE price is unknown (or not positive)
+                cost += CAP_PENALTY
             if target < p.min_soc / 100 * cap + reserve[i] - 0.5 * max(1, p.soc_step) / 100 * cap:
                 # hard rule (reserve), independent of the forecast SoC: a sell slot may never
                 # sell below what the house needs in the following expensive hours
@@ -218,9 +221,13 @@ def compress(
             for cand in _candidates(a.setting, b.setting):
                 trial = segs[:i] + [Segment(a.start, a.length + b.length, cand)] + segs[i + 2 :]
                 c = cost_of(trial)
-                if best is None or c < best[0]:
-                    best = (c, trial)
-        current, segs = best  # type: ignore[misc]
+                # on a tie prefer the passive setting: a "sell"/"grid charge" slot that changes
+                # nothing would still put the inverter in Export First / grid-charge mode
+                key = (round(c, 3), 0 if cand.mode is HourMode.NORMAL else 1)
+                if best is None or key < best[0]:
+                    best = (key, trial)
+        segs = best[1]  # type: ignore[index]
+        current = cost_of(segs)
         # re-join neighbours that became identical
         joined: list[Segment] = []
         for s in segs:
@@ -229,6 +236,29 @@ def compress(
             else:
                 joined.append(s)
         segs = joined
+    # Free slots: cut the idle tail off sell slots (e.g. sell 20:00, then the battery is at the
+    # floor all night - the night part becomes a normal slot instead of Export First).
+    changed = True
+    while changed and len(segs) < slots:
+        changed = False
+        detail: list[dict] = []
+        simulate(hours, _expand(segs), soc_now, params, detail=detail)
+        for i, sg in enumerate(segs):
+            if sg.setting.mode is not HourMode.SELL or sg.length < 2:
+                continue
+            idx = range(sg.start, sg.start + sg.length)
+            active = [k for k in idx if detail[k]["export"] > 0.05]
+            last = active[-1] if active else sg.start - 1
+            tail = sg.start + sg.length - 1 - last
+            if tail < 1:
+                continue
+            head_len = sg.length - tail
+            parts = ([Segment(sg.start, head_len, sg.setting)] if head_len else []) + [
+                Segment(sg.start + head_len, tail, Setting(HourMode.NORMAL, sg.setting.soc))]
+            trial = segs[:i] + parts + segs[i + 1 :]
+            if len(trial) <= slots and cost_of(trial) <= current + 0.01:
+                segs, current, changed = trial, cost_of(trial), True
+                break
     while len(segs) < slots:  # pad: split the longest segment
         i = max(range(len(segs)), key=lambda k: segs[k].length)
         s = segs[i]

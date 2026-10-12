@@ -328,3 +328,30 @@ def test_sell_slot_floor_respects_reserve_regardless_of_forecast_soc():
     assert simulate(hrs, low_floor, 98, p)[0] > 5e3
     ok_floor = [Setting(HourMode.SELL, 40), Setting(HourMode.NORMAL, 10), Setting(HourMode.NORMAL, 10)]
     assert simulate(hrs, ok_floor, 98, p)[0] < 1e3
+
+
+def test_idle_sell_tail_becomes_normal_slot():
+    """Regression (user report): the sell slot 20:00 ran all night at the floor (nothing to sell)
+    and padding duplicated it - the inverter would sit in Export First the whole night."""
+    from dataclasses import replace
+    from core.compress import Segment, Setting, compress
+    from core.optimizer import HourPlan
+    buy = [1.5] * 3 + [0.63] * 9
+    sell = [1.53, 1.65, 1.41] + [0.0] * 9
+    hrs = day(buy, sell, load=[0.7] * 12)
+    p = replace(P, min_soc=20, max_soc=98, min_sell_soc=20)
+    plan = [HourPlan(hrs[0].start, 90, 64, HourMode.SELL, 0, 5, 0, 5, -8),
+            HourPlan(hrs[1].start, 64, 26, HourMode.SELL, 0, 8, 0, 8, -12),
+            HourPlan(hrs[2].start, 26, 20, HourMode.SELL, 0, 0.7, 0, 0.7, -0.8)] + [
+            HourPlan(h.start, 20, 20, HourMode.NORMAL, 0.7, 0, 0, 0, 0.44) for h in hrs[3:]]
+    segs, _ = compress(plan, hrs, 90, p, slots=6)
+    for sg in segs:
+        if sg.setting.mode is HourMode.SELL:
+            assert sg.start + sg.length <= 3, segs  # no sell slot reaches into the night
+
+
+def test_no_export_first_where_price_unknown():
+    from core.compress import Setting, simulate
+    hrs = day([0.63, 0.63], [0.9, 0.0])  # second hour: RCE not published yet
+    assert simulate(hrs, [Setting(HourMode.SELL, 20)] * 2, 20, P)[0] > 5e3
+    assert simulate(hrs, [Setting(HourMode.SELL, 20), Setting(HourMode.NORMAL, 20)], 20, P)[0] < 1e3
