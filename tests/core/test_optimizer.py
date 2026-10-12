@@ -356,3 +356,34 @@ def test_no_export_first_where_price_unknown():
     hrs = day([0.63, 0.63], [0.9, 0.0])  # second hour: RCE not published yet
     assert simulate(hrs, [Setting(HourMode.SELL, 20)] * 2, 20, P)[0] > 5e3
     assert simulate(hrs, [Setting(HourMode.SELL, 20), Setting(HourMode.NORMAL, 20)], 20, P)[0] < 1e3
+
+
+def test_sell_slot_at_full_power_hits_floor_and_house_buys():
+    """Regression (user test on the inverter): sell 98 -> 95 % at full power exported the 3 % in
+    minutes, then the house bought from the grid for the rest of the slot."""
+    from dataclasses import replace
+    from core.compress import Setting, simulate
+    hrs = day([1.5, 0.63], [1.65, 0.9], load=[1.5, 0.5])
+    p = replace(P, max_soc=98, min_sell_soc=20, battery_first_above=0.63, max_grid_charge_price=0.63)
+    detail: list[dict] = []
+    full = [Setting(HourMode.SELL, 95, 10.0), Setting(HourMode.NORMAL, 20)]
+    cost, _ = simulate(hrs, full, 98, p, detail=detail)
+    assert detail[0]["import"] > 1.0 and cost > 5e3  # hard rule: house on expensive grid
+
+
+def test_sell_slot_power_spreads_the_sale_over_the_slot():
+    from dataclasses import replace
+    from core.compress import Segment, Setting, simulate, to_day_plan
+    from core.plan import SlotMode
+    hrs = day([1.5, 1.5, 0.63], [1.65, 1.6, 0.9], load=[1.0, 1.0, 0.5])
+    p = replace(P, max_soc=98, min_sell_soc=20, battery_first_above=0.63, max_grid_charge_price=0.63)
+    sts = [Setting(HourMode.SELL, 60), Setting(HourMode.SELL, 60), Setting(HourMode.NORMAL, 20)]
+    detail: list[dict] = []
+    powers: dict[int, float] = {}
+    cost, _ = simulate(hrs, sts, 98, p, detail=detail, powers=powers)
+    assert cost < 1e3 and detail[0]["import"] < 0.05 and detail[1]["import"] < 0.05
+    assert 1.0 < powers[0] < 10.0  # not full power
+    hrs7 = day([1.5, 1.5] + [0.63] * 5, [1.65, 1.6] + [0.9] * 5, load=[1.0, 1.0] + [0.5] * 5)
+    segs = [Segment(0, 2, sts[0])] + [Segment(k, 1, sts[2]) for k in range(2, 7)]
+    plan = to_day_plan(segs, hrs7, p, soc_now=98)
+    assert plan.slots[0].mode is SlotMode.SELL and plan.slots[0].power == round(powers[0] * 10) * 100

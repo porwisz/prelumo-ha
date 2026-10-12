@@ -100,7 +100,7 @@ def run_planner(
     opt = optimize(hin, inp.soc, params, strategy, arbitrage)
     window = max(6, min(inp.window_h, 24, len(hin)))
     segs, _ = compress(opt.hours, hin, inp.soc, params, window=window)
-    plan = to_day_plan(segs, hin, params, current)
+    plan = to_day_plan(segs, hin, params, current, soc_now=inp.soc)
     day = hin[:window]
     slot_hourly: list[dict] = []
     slot_cost = simulate(day, settings_from_plan(plan, day), inp.soc, params, detail=slot_hourly)[0]

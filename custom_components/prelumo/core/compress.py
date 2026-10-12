@@ -7,6 +7,8 @@ whose simulated cost increase is the smallest.
 
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -26,6 +28,7 @@ _MODE_TO_SLOT = {
 class Setting:
     mode: HourMode
     soc: int
+    power_kw: float | None = None  # sell slot power; None = chosen to spread the sale over the slot
 
 
 @dataclass
@@ -85,10 +88,16 @@ def simulate(
     hours: list[HourInput], settings: list[Setting], soc_now: float, p: BatteryParams,
     sell_power_kw: float | None = None,
     detail: list[dict] | None = None,
+    powers: dict[int, float] | None = None,
 ) -> tuple[float, list[float]]:
     """Inverter behaviour per hour; returns (cost, soc trajectory %).
 
     ``detail``: if given, one dict per hour is appended (what the inverter is expected to do).
+    ``powers``: if given, the chosen power (kW) of each sell run, keyed by its first hour.
+
+    Export First discharges at the slot power until the slot floor and then the battery stops
+    covering the house for the rest of the slot, so a sell slot gets a power that spreads the
+    sale over the whole slot (never below the house demand).
     """
     cap = p.capacity_kwh
     soc = soc_now / 100 * cap
@@ -98,6 +107,7 @@ def simulate(
     traj = []
     sold_since_cheap = 0.0  # battery energy exported since the last cheap hour
     reserve = expensive_reserve(hours, p)
+    run_kw = sell_kw
     for i, (h, st) in enumerate(zip(hours, settings)):
         expensive = p.battery_first_above is not None and h.buy > p.battery_first_above + 1e-9
         if not expensive:
@@ -109,6 +119,18 @@ def simulate(
         bus = 0.0  # + charging
         if st.mode is HourMode.SELL:
             lo = max(lo, p.min_sell_soc / 100 * cap)
+            if i == 0 or settings[i - 1] != st:  # a new sell run starts here
+                if st.power_kw is not None or sell_power_kw is not None:
+                    run_kw = min(st.power_kw if st.power_kw is not None else sell_kw, p.max_discharge_kw)
+                else:
+                    run = 1
+                    while i + run < len(settings) and settings[i + run] == st:
+                        run += 1
+                    peak = max(max(0.0, x.load + x.ev - x.pv) for x in hours[i:i + run])
+                    spread = max(0.0, soc - lo) * eta / run
+                    run_kw = min(p.max_discharge_kw, max(math.floor(spread * 10) / 10, math.ceil((peak + 0.3) * 10) / 10))
+                if powers is not None:
+                    powers[i] = run_kw
             if h.sell <= 0:
                 # hard rule: no Export First where the RCE price is unknown (or not positive)
                 cost += CAP_PENALTY
@@ -130,7 +152,7 @@ def simulate(
             e = min(target - soc, p.max_charge_kw * eta)
             bus = e / eta
         elif st.mode is HourMode.SELL and soc > lo:
-            e = min(soc - lo, sell_kw / eta, p.max_discharge_kw)
+            e = min(soc - lo, run_kw / eta, p.max_discharge_kw)
             bus = -e * eta
         elif net < 0 and soc < hi:
             e = min(-net * eta, hi - soc, p.max_charge_kw * eta)
@@ -143,7 +165,18 @@ def simulate(
             bus = -e * eta
         soc += bus * eta if bus > 0 else bus / eta
         g = net + bus
-        imp, exp = max(0.0, g), min(max(0.0, -g), p.grid_export_kw)
+        imp, exp = max(0.0, g), max(0.0, -g)
+        if st.mode is HourMode.SELL and bus < 0 and net > 0:
+            # Export First discharges at full slot power until the floor, then the battery stops
+            # covering the house for the rest of the slot: the house buys from the grid
+            tau = min(1.0, -bus / run_kw) if run_kw > 0 else 0.0
+            shift = net * (1.0 - tau)
+            if expensive and shift > 0.05:
+                # hard rule (battery first): the sell slot hits its floor and the house buys here
+                cost += CAP_PENALTY
+            imp += shift
+            exp += shift
+        exp = min(exp, p.grid_export_kw)
         if bus < 0:
             sold_since_cheap += max(0.0, min(-bus, -g))  # the part of the discharge that was exported
         house_import = min(imp, max(0.0, h.load - h.pv))
@@ -173,7 +206,8 @@ def settings_from_plan(plan: DayPlan, hours: list[HourInput]) -> list[Setting]:
     out = []
     for h in hours:
         slot = plan.active_slot(h.start)
-        out.append(Setting(_SLOT_TO_MODE[slot.mode], slot.soc))
+        mode = _SLOT_TO_MODE[slot.mode]
+        out.append(Setting(mode, slot.soc, slot.power / 1000 if mode is HourMode.SELL else None))
     return out
 
 
@@ -272,14 +306,22 @@ def compress(
 def to_day_plan(
     segments: list[Segment], hours: list[HourInput], params: BatteryParams,
     current: DayPlan | None = None,
+    soc_now: float | None = None,
 ) -> DayPlan:
-    power = int(min(MAX_POWER_W, params.max_discharge_kw * 1000))
+    max_w = int(min(MAX_POWER_W, params.max_discharge_kw * 1000))
+    powers: dict[int, float] = {}
+    if soc_now is not None:
+        simulate(hours, _expand(segments) + [Setting(HourMode.NORMAL, 0)] * (len(hours) - sum(
+            s.length for s in segments)), soc_now, params, powers=powers)
     slots = []
     for seg in segments:
         dt: datetime = hours[seg.start].start
         soc = int(seg.setting.soc)
         if seg.setting.mode is HourMode.SELL:  # sell slot SoC = discharge floor
             soc = max(soc, params.min_sell_soc)
+        power = max_w
+        if seg.setting.mode is HourMode.SELL and seg.start in powers:
+            power = min(max_w, int(round(powers[seg.start] * 10)) * 100)
         slot = Slot(dt.hour * 100 + dt.minute, power, soc, 0)
         slots.append(slot.with_mode(_MODE_TO_SLOT[seg.setting.mode]))
     return DayPlan(tuple(slots)).merge_preserved_flags(current)
