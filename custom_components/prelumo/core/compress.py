@@ -84,8 +84,12 @@ def hour_setting(
 def simulate(
     hours: list[HourInput], settings: list[Setting], soc_now: float, p: BatteryParams,
     sell_power_kw: float | None = None,
+    detail: list[dict] | None = None,
 ) -> tuple[float, list[float]]:
-    """Inverter behaviour per hour; returns (cost, soc trajectory %)."""
+    """Inverter behaviour per hour; returns (cost, soc trajectory %).
+
+    ``detail``: if given, one dict per hour is appended (what the inverter is expected to do).
+    """
     cap = p.capacity_kwh
     soc = soc_now / 100 * cap
     eta = p.eta
@@ -144,8 +148,15 @@ def simulate(
             # hard rule (reserve): battery energy was sold and now the house buys at this price
             cost += CAP_PENALTY
         wear = (-bus / eta) * p.wear_cost if bus < 0 else 0.0
-        cost += imp * h.buy - (exp * h.sell if h.sell > 0 else 0.0) + wear
+        hour_cost = imp * h.buy - (exp * h.sell if h.sell > 0 else 0.0) + wear
+        cost += hour_cost
         traj.append(soc / cap * 100)
+        if detail is not None:
+            detail.append({
+                "start": h.start.isoformat(), "mode": st.mode.value, "floor": st.soc,
+                "soc": round(soc / cap * 100), "import": round(imp, 2), "export": round(exp, 2),
+                "cost": round(hour_cost, 3), "buy": round(h.buy, 4), "sell": round(h.sell, 4),
+            })
     tp = min((h.buy for h in hours), default=0.0) * eta
     cost -= (soc - p.min_soc / 100 * cap) * tp
     return cost, traj
@@ -183,9 +194,10 @@ def compress(
     soc_now: float,
     params: BatteryParams,
     slots: int = SLOT_COUNT,
+    window: int = 24,
 ) -> tuple[list[Segment], float]:
     """Greedy cost-aware merge of hourly settings into ``slots`` segments (first 24 h)."""
-    n = min(24, len(plan))
+    n = min(window, len(plan))
     plan, hours = plan[:n], hours[:n]
     segs: list[Segment] = []
     for i, hp in enumerate(plan):

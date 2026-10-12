@@ -23,6 +23,7 @@ class PlannerInputs:
     sell: dict[datetime, float]
     tariff: G13Tariff
     horizon_h: int = 36
+    window_h: int = 18  # the 6 slots are built from (and judged on) this many hours
 
 
 @dataclass
@@ -36,6 +37,8 @@ class PlannerResult:
     missing_sell_hours: int
     notes: list[str] = field(default_factory=list)
     current_plan_cost: float | None = None  # same forecast, schedule currently on the inverter
+    slot_hourly: list[dict] = field(default_factory=list)  # proposed slots, as the inverter runs them
+    current_hourly: list[dict] = field(default_factory=list)  # schedule now on the inverter
 
     @property
     def gain_vs_current(self) -> float | None:
@@ -92,22 +95,27 @@ def run_planner(
     hours = horizon_hours(inp.now, inp.horizon_h)
     hin, missing = build_hours(inp, hours)
     opt = optimize(hin, inp.soc, params, strategy, arbitrage)
-    segs, _ = compress(opt.hours, hin, inp.soc, params)
+    window = max(6, min(inp.window_h, 24, len(hin)))
+    segs, _ = compress(opt.hours, hin, inp.soc, params, window=window)
     plan = to_day_plan(segs, hin, params, current)
-    day = hin[:24]
-    slot_cost = simulate(day, [s.setting for s in segs for _ in range(s.length)], inp.soc, params)[0]
+    day = hin[:window]
+    slot_hourly: list[dict] = []
+    slot_cost = simulate(day, settings_from_plan(plan, day), inp.soc, params, detail=slot_hourly)[0]
     base = simulate_baseline(day, inp.soc, params)
     notes = list(opt.notes)
     cur_cost = None
+    current_hourly: list[dict] = []
     if current is not None:
+        cost_now = simulate(day, settings_from_plan(current, day), inp.soc, params, detail=current_hourly)[0]
         broken = plan_violations(current, day, params, strategy)
         if broken:  # must be replaceable regardless of cost
             notes.append("current_plan_violates:" + ",".join(broken))
         else:
-            cur_cost = simulate(day, settings_from_plan(current, day), inp.soc, params)[0]
+            cur_cost = cost_now
     if missing:
         notes.append(f"sell_price_missing_{missing}h")
-    return PlannerResult(plan, hin, opt, segs, slot_cost, base, missing, notes, cur_cost)
+    return PlannerResult(plan, hin, opt, segs, slot_cost, base, missing, notes, cur_cost,
+                         slot_hourly, current_hourly)
 
 
 def plan_violations(

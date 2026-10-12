@@ -11,7 +11,8 @@ Prelumo nie rozmawia z Modbusem — korzysta wyłącznie z encji i akcji HA
 
 ```
 co 30 s   odczyt harmonogramu → aktywny slot → tryb pracy (Export First tylko w slocie Sell)
-co godz.  prognozy → optymalizator godzinowy (DP po SoC) → scalenie do 6 slotów
+co godz.  prognozy → optymalizator godzinowy na cały horyzont (36 h, DP po SoC)
+          → 6 slotów z najbliższego okna (domyślnie 18 h)
           → porównanie z falownikiem → zapis tylko gdy: istotna zmiana zachowania,
             nowy plan tańszy od obecnego o ≥ „min. zysk” (domyślnie 0,50 zł/24 h)
             albo obecny łamie limity; maks. 6 zapisów/dobę

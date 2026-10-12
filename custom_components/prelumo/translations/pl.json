@@ -114,7 +114,8 @@
           "max_charge_soc": "Maks. ładowanie na co dzień",
           "full_charge_days": "Pełne ładowanie co (dni)",
           "battery_first_in_expensive_hours": "Bateria najpierw zasila dom w drogich godzinach",
-          "reserve_margin": "Margines rezerwy na drogie godziny"
+          "reserve_margin": "Margines rezerwy na drogie godziny",
+          "slot_window_hours": "Okno harmonogramu"
         },
         "data_description": {
           "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell",
@@ -124,7 +125,8 @@
           "max_charge_soc": "Na co dzień Prelumo planuje baterię najwyżej do tego poziomu (ostatnie % ładują się długo).",
           "full_charge_days": "Co N dni Prelumo planuje jedno ładowanie do 100% (balansowanie BMS), najtańszym dozwolonym sposobem. 0 = wyłączone.",
           "battery_first_in_expensive_hours": "Gdy cena zakupu jest wyższa niż maks. cena ładowania z sieci, dom zasila bateria do min. SoC — bez kupowania z sieci po to, by sprzedać baterię później.",
-          "reserve_margin": "Przy włączonej opcji „bateria najpierw”: bateria sprzedaje tylko ponad prognozowane zużycie domu i pompy ciepła w pozostałych drogich godzinach, plus ten margines."
+          "reserve_margin": "Przy włączonej opcji „bateria najpierw”: bateria sprzedaje tylko ponad prognozowane zużycie domu i pompy ciepła w pozostałych drogich godzinach, plus ten margines.",
+          "slot_window_hours": "Optymalizator planuje cały horyzont, ale 6 slotów falownika powstaje (i jest oceniane) tylko z najbliższych N godzin; Prelumo i tak przelicza co godzinę."
         }
       }
     },

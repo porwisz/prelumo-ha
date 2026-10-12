@@ -28,7 +28,7 @@ from .const import (
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_BATTERY_FIRST, OPT_RESERVE_MARGIN, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
+    OPT_BATTERY_FIRST, OPT_RESERVE_MARGIN, OPT_SLOT_WINDOW, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
     STORAGE_VERSION, UPDATE_INTERVAL,
 )
 from .core.balance import FULL_SOC, FullChargeTracker
@@ -128,7 +128,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         o = self.opt
         return WritePolicy(
             soc_tolerance=int(o[OPT_SOC_TOLERANCE]), max_writes_per_day=int(o[OPT_MAX_WRITES]),
-            min_gain=float(o[OPT_MIN_GAIN]),
+            min_gain=float(o[OPT_MIN_GAIN]), window_h=int(o[OPT_SLOT_WINDOW]),
         )
 
     def full_charge_due(self) -> bool:
@@ -393,7 +393,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         if outage:
             ev.battery_allowed = [True] * len(hours)
 
-        inp = PlannerInputs(now, soc, pv, base, hp, ev, sell_h, self.tariff(), horizon)
+        inp = PlannerInputs(now, soc, pv, base, hp, ev, sell_h, self.tariff(), horizon, int(o[OPT_SLOT_WINDOW]))
         params = self.battery_params()
         result = await self.hass.async_add_executor_job(
             run_planner, inp, params, self.strategy, self.arbitrage, current

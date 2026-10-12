@@ -15,7 +15,8 @@ class WritePolicy:
     power_tolerance_w: int = 500
     max_writes_per_day: int = 6
     min_interval: timedelta = timedelta(minutes=50)
-    min_gain: float = 0.5  # PLN per 24 h; smaller improvements are not worth a flash write
+    min_gain: float = 0.5  # PLN per window; smaller improvements are not worth a flash write
+    window_h: int = 24  # behaviour is compared over this many hours
 
 
 def material_changes(
@@ -30,7 +31,7 @@ def material_changes(
         return ["no_current_plan"]
     t0 = (now or datetime(2000, 1, 1)).replace(second=0, microsecond=0)
     reasons: list[str] = []
-    for k in range(96):
+    for k in range(max(1, policy.window_h) * 4):
         t = t0 + timedelta(minutes=15 * k)
         a, b = old.active_slot(t), new.active_slot(t)
         when = f"{t:%H:%M}"
