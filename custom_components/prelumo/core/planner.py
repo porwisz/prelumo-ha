@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from .compress import Segment, compress, settings_from_plan, simulate, to_day_plan
+from .compress import Segment, battery_held, compress, settings_from_plan, simulate, to_day_plan
 from .forecast.ev import EvForecast
 from .optimizer import BatteryParams, HourInput, OptimizeResult, Strategy, optimize, simulate_baseline
 from .plan import MAX_POWER_W, DayPlan, PlanError, Slot, SlotMode, parse_hhmm
@@ -125,6 +125,8 @@ def plan_violations(
         if (slot.mode is SlotMode.GRID_CHARGE and params.max_grid_charge_price is not None
                 and h.buy > params.max_grid_charge_price + 1e-9):
             out.add("grid_charge_above_price_cap")
+        if slot.mode is SlotMode.NONE and battery_held(h, slot.soc, params):
+            out.add("battery_held_in_expensive_hour")
     return sorted(out)
 
 

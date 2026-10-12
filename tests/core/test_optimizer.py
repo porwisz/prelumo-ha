@@ -249,3 +249,31 @@ def test_battery_first_in_expensive_hours():
     for slot in plan.slots:
         if slot.start // 100 in (2, 3) and slot.mode.value == "none":
             assert slot.soc == on_p.min_soc
+
+
+def test_battery_first_survives_slot_merging_and_replaces_bad_plan():
+    """Regression (user report, 2nd): cheap 15:00 (hold 98% is right there) was merged with the
+    expensive 16-18 into one 'normal 98%' slot, and the gain threshold kept the bad schedule.
+    """
+    from dataclasses import replace
+    from datetime import datetime as _dt
+    from core.forecast.ev import EvForecast
+    from core.planner import PlannerInputs, plan_violations, run_planner
+    from core.tariff import G13Tariff
+    now = _dt(2026, 10, 12, 12, 0)  # Monday
+    hours = [now + timedelta(hours=i) for i in range(36)]
+    rce = {12: 0.58, 13: 0.61, 14: 0.65, 15: 0.72, 16: 0.9, 17: 1.24, 18: 1.53, 19: 1.65, 20: 1.41}
+    sell = {h: rce.get(h.hour, 0.6) for h in hours[:12]}
+    pv = {h: max(0.0, 2.0 - abs(h.hour - 12) * 0.5) for h in hours}
+    inp = PlannerInputs(now, 30, pv, [0.6] * 36, [0.4] * 36, EvForecast([0.0] * 36, [], [False] * 36),
+                        sell, G13Tariff(1.05, 1.45, 0.65), 36)
+    p = replace(P, max_soc=98, max_grid_charge_price=0.65, min_sell_soc=20, soc_step=2,
+                battery_first_above=0.65)
+    r = run_planner(inp, p, Strategy.MAX_GRID_TRADING, True)
+    for h in r.hours[4:6]:  # 16:00, 17:00
+        slot = r.plan.active_slot(h.start)
+        assert not (slot.mode.value == "none" and slot.soc > p.min_soc + 1), r.plan.as_list()
+    bad = parse_fallback_plan("11:00 10; 14:00 98 grid_charge; 16:00 98; 18:00 20 sell; 00:00 98 grid_charge; 07:00 22 sell")
+    assert "battery_held_in_expensive_hour" in plan_violations(bad, r.hours[:24], p, Strategy.MAX_GRID_TRADING)
+    again = run_planner(inp, p, Strategy.MAX_GRID_TRADING, True, current=bad)
+    assert again.gain_vs_current is None  # cost comparison does not protect a rule-breaking plan

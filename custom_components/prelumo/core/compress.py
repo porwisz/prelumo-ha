@@ -35,6 +35,16 @@ class Segment:
     setting: Setting
 
 
+def battery_held(h: HourInput, floor: int, p: BatteryParams) -> bool:
+    """A normal-slot floor above min SoC in an expensive hour, while battery-first is on."""
+    return (
+        p.battery_first_above is not None
+        and h.buy > p.battery_first_above + 1e-9
+        and floor > p.min_soc + 1
+        and (h.ev <= 0.05 or h.ev_battery_allowed)
+    )
+
+
 def stored_energy_value(plan: list[HourPlan], hours: list[HourInput], i: int, p: BatteryParams) -> float:
     """What 1 kWh kept in the battery after hour ``i`` is worth later (PLN, at the AC side).
 
@@ -93,6 +103,9 @@ def simulate(
         # the inverter charges from the grid whenever a grid-charge slot is active - it knows
         # nothing about prices - so a merge that charges above the cap must be rejected
         over_cap = p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9
+        if (st.mode is HourMode.NORMAL and battery_held(h, st.soc, p)):
+            # hard rule (battery first in expensive hours): no floor above min SoC there
+            cost += CAP_PENALTY
         if st.mode is HourMode.GRID_CHARGE and over_cap:
             # hard rule, independent of the forecast: if the battery is lower than predicted,
             # the inverter would charge from the grid at this price (and the house runs on grid)
