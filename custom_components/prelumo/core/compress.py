@@ -196,6 +196,8 @@ def simulate(
                 "start": h.start.isoformat(), "mode": st.mode.value, "floor": st.soc,
                 "soc": round(soc / cap * 100), "import": round(imp, 2), "export": round(exp, 2),
                 "cost": round(hour_cost, 3), "buy": round(h.buy, 4), "sell": round(h.sell, 4),
+                "load": round(h.load, 2), "ev": round(h.ev, 2), "pv": round(h.pv, 2),
+                "battery": round(-bus if bus < 0 else 0.0, 2),  # battery output to the house bus
             })
     tp = min((h.buy for h in hours), default=0.0) * eta
     cost -= (soc - p.min_soc / 100 * cap) * tp
