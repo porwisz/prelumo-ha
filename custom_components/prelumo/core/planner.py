@@ -7,7 +7,9 @@ from datetime import datetime, timedelta
 
 from .compress import Segment, battery_held, compress, settings_from_plan, simulate, to_day_plan
 from .forecast.ev import EvForecast
-from .optimizer import BatteryParams, HourInput, OptimizeResult, Strategy, optimize, simulate_baseline
+from .optimizer import (
+    BatteryParams, HourInput, OptimizeResult, Strategy, expensive_reserve, optimize, simulate_baseline,
+)
 from .plan import MAX_POWER_W, DayPlan, PlanError, Slot, SlotMode, parse_hhmm
 from .tariff import G13Tariff
 
@@ -124,13 +126,17 @@ def plan_violations(
 ) -> list[str]:
     """Rules an existing inverter schedule breaks under the current settings."""
     out: set[str] = set()
-    for h in hours:
+    reserve = expensive_reserve(hours, params)
+    half_step = 0.5 * max(1, params.soc_step)
+    for h, res in zip(hours, reserve):
         slot = plan.active_slot(h.start)
         if slot.mode is SlotMode.SELL:
             if strategy is Strategy.SELF_CONSUMPTION:
                 out.add("sell_in_self_consumption")
             if slot.soc < params.min_sell_soc:
                 out.add("sell_below_min_soc")
+            if slot.soc < params.min_soc + res / params.capacity_kwh * 100 - half_step:
+                out.add("sell_below_expensive_reserve")
         if (slot.mode is SlotMode.GRID_CHARGE and params.max_grid_charge_price is not None
                 and h.buy > params.max_grid_charge_price + 1e-9):
             out.add("grid_charge_above_price_cap")

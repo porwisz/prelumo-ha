@@ -60,3 +60,22 @@ def test_no_sales_planned_into_hours_without_rce_price():
     res = run_planner(inp, BatteryParams(soc_step=5), Strategy.MAX_GRID_TRADING, arbitrage=True)
     assert res.missing_sell_hours == 26
     assert all(h.battery_export < 0.06 for h in res.optimum.hours[10:])
+
+
+def test_violation_sell_below_expensive_reserve():
+    from core.optimizer import HourInput
+    from core.plan import DayPlan, Slot
+    from core.planner import plan_violations
+    d0 = datetime(2026, 10, 12, 19)
+    hrs = [HourInput(d0 + timedelta(hours=i), 0.0, l, 0.0, b, 1.4)
+           for i, (l, b) in enumerate([(1.0, 1.5), (3.0, 1.5), (0.5, 0.63)])]
+    p = BatteryParams(capacity_kwh=20, min_soc=20, max_soc=98, max_charge_kw=10, max_discharge_kw=10,
+                      min_sell_soc=20, max_grid_charge_price=0.63, battery_first_above=0.63,
+                      reserve_margin=0.2)
+    def plan(soc):
+        s = [Slot(0, 10000, 20, 0), Slot(1900, 10000, soc, 0).with_mode(SlotMode.SELL),
+             Slot(2100, 10000, 20, 0), Slot(2200, 10000, 20, 0), Slot(2300, 10000, 20, 0),
+             Slot(2330, 10000, 20, 0)]
+        return DayPlan(tuple(s))
+    assert "sell_below_expensive_reserve" in plan_violations(plan(20), hrs, p, Strategy.MAX_GRID_TRADING)
+    assert "sell_below_expensive_reserve" not in plan_violations(plan(50), hrs, p, Strategy.MAX_GRID_TRADING)
