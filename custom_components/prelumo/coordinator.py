@@ -146,11 +146,21 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             reserve_margin=float(o[OPT_RESERVE_MARGIN]) / 100,
             max_charge_kw=float(o[OPT_MAX_CHARGE]), max_discharge_kw=float(o[OPT_MAX_DISCHARGE]),
             roundtrip_efficiency=float(o[OPT_EFFICIENCY]), wear_cost=float(o[OPT_WEAR]),
-            grid_import_kw=float(o[OPT_GRID_IMPORT]), grid_export_kw=float(o[OPT_GRID_EXPORT]),
+            grid_import_kw=float(o[OPT_GRID_IMPORT]), grid_export_kw=self.grid_export_kw(),
             soc_step=int(o[OPT_SOC_STEP]),
             max_grid_charge_price=self.max_grid_charge_price(),
             min_sell_soc=int(o[OPT_MIN_SELL_SOC]),
         )
+
+    def grid_export_kw(self) -> float:
+        """Option value, capped by the inverter's own max sell power setting when available."""
+        v = float(self.opt[OPT_GRID_EXPORT])
+        st = self.hass.states.get(self.inv.max_sell_power)
+        try:
+            inv_kw = float(st.state) / 1000 if st is not None else 0.0
+        except ValueError:
+            inv_kw = 0.0
+        return min(v, inv_kw) if inv_kw > 0 else v
 
     def max_grid_charge_price(self) -> float:
         """Option value, or the lowest G13 zone price when set to 0."""

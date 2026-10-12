@@ -387,3 +387,16 @@ def test_sell_slot_power_spreads_the_sale_over_the_slot():
     segs = [Segment(0, 2, sts[0])] + [Segment(k, 1, sts[2]) for k in range(2, 7)]
     plan = to_day_plan(segs, hrs7, p, soc_now=98)
     assert plan.slots[0].mode is SlotMode.SELL and plan.slots[0].power == round(powers[0] * 10) * 100
+
+
+def test_sell_export_capped_by_inverter_sell_limit():
+    """The Deye 'max sell power' (5.39 kW) caps the export: a sell slot discharges at most
+    house + limit, so the SoC falls slower than the slot power suggests."""
+    from dataclasses import replace
+    from core.compress import Setting, simulate
+    hrs = day([0.63, 0.63], [1.0, 0.9], load=[1.0, 0.5])
+    p = replace(P, max_soc=98, min_sell_soc=20, grid_export_kw=5.39)
+    detail: list[dict] = []
+    simulate(hrs, [Setting(HourMode.SELL, 20, 10.0), Setting(HourMode.NORMAL, 20)], 98, p, detail=detail)
+    assert detail[0]["export"] <= 5.39 + 1e-6 and detail[0]["import"] < 0.05
+    assert detail[0]["soc"] > 60  # ~6.4 kWh out of 20 kWh, not 10 kWh

@@ -82,6 +82,10 @@ class InverterEntities:
     def grid_export_total(self) -> str:
         return self.s("suma_siec_oddanie")
 
+    @property
+    def max_sell_power(self) -> str:
+        return self.s("ust_maks_moc_sprzedazy")
+
     def slot(self, n: int, field: str) -> str:
         return self.s(f"harmonogram_{n}_{field}")
 

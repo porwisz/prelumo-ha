@@ -128,7 +128,8 @@ def simulate(
                         run += 1
                     peak = max(max(0.0, x.load + x.ev - x.pv) for x in hours[i:i + run])
                     spread = max(0.0, soc - lo) * eta / run
-                    run_kw = min(p.max_discharge_kw, max(math.floor(spread * 10) / 10, math.ceil((peak + 0.3) * 10) / 10))
+                    want = max(math.floor(spread * 10) / 10, math.ceil((peak + 0.3) * 10) / 10)
+                    run_kw = min(p.max_discharge_kw, p.grid_export_kw + peak, want)
                 if powers is not None:
                     powers[i] = run_kw
             if h.sell <= 0:
@@ -152,7 +153,9 @@ def simulate(
             e = min(target - soc, p.max_charge_kw * eta)
             bus = e / eta
         elif st.mode is HourMode.SELL and soc > lo:
-            e = min(soc - lo, run_kw / eta, p.max_discharge_kw)
+            # the battery output covers the house and exports at most the inverter's sell limit
+            out_kw = max(0.0, min(run_kw, p.grid_export_kw + net))
+            e = min(soc - lo, out_kw / eta, p.max_discharge_kw)
             bus = -e * eta
         elif net < 0 and soc < hi:
             e = min(-net * eta, hi - soc, p.max_charge_kw * eta)
@@ -169,7 +172,8 @@ def simulate(
         if st.mode is HourMode.SELL and bus < 0 and net > 0:
             # Export First discharges at full slot power until the floor, then the battery stops
             # covering the house for the rest of the slot: the house buys from the grid
-            tau = min(1.0, -bus / run_kw) if run_kw > 0 else 0.0
+            rate = min(run_kw, p.grid_export_kw + net)
+            tau = min(1.0, -bus / rate) if rate > 0 else 0.0
             shift = net * (1.0 - tau)
             if expensive and shift > 0.05:
                 # hard rule (battery first): the sell slot hits its floor and the house buys here
