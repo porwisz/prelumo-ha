@@ -239,3 +239,14 @@ async def test_full_charge_monitoring(hass: HomeAssistant, setup) -> None:
     assert coord.battery_params().max_soc == 98 and not coord.battery_params().require_full
     st = hass.states.get("sensor.prelumo_last_full_charge")
     assert st.attributes["interval_days"] == 7 and st.attributes["due"] is False
+
+
+async def test_options_flow_opens_and_saves(hass: HomeAssistant, setup) -> None:
+    entry, _ = setup
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    assert r["type"] is FlowResultType.FORM, r
+    data = {k: v for k, v in OPTION_DEFAULTS.items()}
+    data["min_soc"] = 20
+    r = await hass.config_entries.options.async_configure(r["flow_id"], data)
+    assert r["type"] is FlowResultType.CREATE_ENTRY, r
+    assert entry.options["min_soc"] == 20

@@ -31,10 +31,10 @@ def _ent(domain: str | list[str]) -> selector.EntitySelector:
 
 
 def _num(lo: float, hi: float, step: float, unit: str | None = None) -> selector.NumberSelector:
-    return selector.NumberSelector(
-        selector.NumberSelectorConfig(min=lo, max=hi, step=step, unit_of_measurement=unit,
-                                      mode=selector.NumberSelectorMode.BOX)
-    )
+    cfg: dict[str, Any] = {"min": lo, "max": hi, "step": step, "mode": selector.NumberSelectorMode.BOX}
+    if unit:  # HA rejects unit_of_measurement=None
+        cfg["unit_of_measurement"] = unit
+    return selector.NumberSelector(selector.NumberSelectorConfig(**cfg))
 
 
 def _opt(key: str, data: dict) -> Any:
