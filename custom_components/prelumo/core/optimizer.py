@@ -172,6 +172,14 @@ def _transition(
                 delivered = need
 
     battery_export = max(0.0, delivered - deficit)
+    if battery_export > EPS and h.sell <= 0:
+        # no (or unknown) sell price: never a sale; up to one SoC step is grid rounding
+        step_kwh = max(1, p.soc_step) / 100 * p.capacity_kwh * p.eta
+        if battery_export > step_kwh + EPS:
+            return None
+        rounding += battery_export
+        delivered -= battery_export
+        battery_export = 0.0
     if battery_export > EPS and (strategy is Strategy.SELF_CONSUMPTION or not may_export or s1 < p.min_sell_soc):
         return None
     if battery_export > EPS and (s1 - p.min_soc) / 100 * p.capacity_kwh < reserve - 1e-9:

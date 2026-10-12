@@ -58,8 +58,9 @@ def horizon_hours(now: datetime, n: int) -> list[datetime]:
 
 def build_hours(inp: PlannerInputs, hours: list[datetime]) -> tuple[list[HourInput], int]:
     missing = 0
-    known = [v for v in inp.sell.values()]
-    fallback = (sum(known) / len(known)) if known else 0.0
+    # Unknown RCE (tomorrow is published ~14:00): never plan a sale on a made-up price.
+    # 0 = no revenue, so the optimiser does not charge or hold energy to sell into those hours.
+    fallback = 0.0
     out = []
     for i, h in enumerate(hours):
         sell = inp.sell.get(h)

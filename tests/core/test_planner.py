@@ -48,3 +48,15 @@ def test_slot_window_and_inverter_view():
 
 def res_plan(inp):
     return parse_fallback_plan("00:00 20; 05:00 80 grid_charge; 07:00 20; 13:00 20; 16:00 50; 21:00 20")
+
+
+def test_no_sales_planned_into_hours_without_rce_price():
+    """Regression: missing RCE hours were filled with the day average (0.94) -> fake night
+    arbitrage (grid charge at 01:00, sell at 02:00)."""
+    hours = [NOW.replace(minute=0) + timedelta(hours=i) for i in range(36)]
+    known = {h: 0.5 for h in hours[:10]}  # only the next 10 h are known
+    inp = PlannerInputs(NOW, 50, {h: 0.0 for h in hours}, [0.5] * 36, [0.0] * 36,
+                        EvForecast([0.0] * 36, [], [False] * 36), known, G13Tariff(0.9, 1.5, 0.63), 36)
+    res = run_planner(inp, BatteryParams(soc_step=5), Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert res.missing_sell_hours == 26
+    assert all(h.battery_export < 0.06 for h in res.optimum.hours[10:])
