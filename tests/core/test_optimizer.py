@@ -277,3 +277,27 @@ def test_battery_first_survives_slot_merging_and_replaces_bad_plan():
     assert "battery_held_in_expensive_hour" in plan_violations(bad, r.hours[:24], p, Strategy.MAX_GRID_TRADING)
     again = run_planner(inp, p, Strategy.MAX_GRID_TRADING, True, current=bad)
     assert again.gain_vs_current is None  # cost comparison does not protect a rule-breaking plan
+
+
+def test_reserve_for_expensive_hours_after_selling():
+    """Regression (user report): sold down to 20% at 19:00 (RCE 1.65), then the heat pump bought
+    at 20:00 for 1.4961. With battery-first, selling keeps the forecast need of the remaining
+    expensive hours (+ margin).
+    """
+    from dataclasses import replace
+    from core.optimizer import expensive_reserve
+    buy = [0.63, 1.5, 1.5, 1.5, 0.63, 0.63]
+    sell = [0.6, 1.53, 1.65, 1.41, 0.9, 0.8]
+    load = [0.5, 0.5, 0.5, 3.0, 0.5, 0.5]  # heat pump at 20:00
+    hrs = day(buy, sell, load=load)
+    p = replace(P, max_soc=98, min_sell_soc=20, max_grid_charge_price=0.63,
+                battery_first_above=0.63, reserve_margin=0.3)
+    res = expensive_reserve(hrs, p)
+    assert res[2] > 3.0 * 1.3  # after 19:00: 20:00 needs 3 kWh + 30 %
+    assert res[3] == 0.0 and res[0] > res[2]
+    r = optimize(hrs, 90, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert r.hours[3].grid_import < 0.06, r.hours[3]  # 20:00 covered by the battery
+    assert any(h.battery_export > 1 for h in r.hours[1:3])  # still sells the surplus
+    assert r.hours[2].soc_end >= p.min_soc + res[2] / p.capacity_kwh * 100 - P.soc_step
+    off = optimize(hrs, 90, replace(p, battery_first_above=None), Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert off.hours[3].grid_import > 1  # without the rule it sells everything and buys back

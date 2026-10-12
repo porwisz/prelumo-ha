@@ -250,3 +250,19 @@ async def test_options_flow_opens_and_saves(hass: HomeAssistant, setup) -> None:
     r = await hass.config_entries.options.async_configure(r["flow_id"], data)
     assert r["type"] is FlowResultType.CREATE_ENTRY, r
     assert entry.options["min_soc"] == 20
+
+
+async def test_models_relearned_after_restart_same_day(hass: HomeAssistant, setup) -> None:
+    """Models live in memory; a restart on a day already learned must not leave them empty."""
+    from homeassistant.util import dt as dt_util
+    from unittest.mock import AsyncMock
+    entry, _ = setup
+    coord = entry.runtime_data
+    coord._models_ready = False  # what a fresh start looks like
+    coord.last_learn = dt_util.now().date().isoformat()
+    coord._learn = AsyncMock()
+    await coord.async_replan()
+    coord._learn.assert_awaited_once()
+    assert coord._models_ready
+    await coord.async_replan()
+    coord._learn.assert_awaited_once()  # not again the same day

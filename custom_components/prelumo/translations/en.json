@@ -113,7 +113,8 @@
           "min_gain": "Min gain to write a plan",
           "max_charge_soc": "Everyday max charge",
           "full_charge_days": "Full charge every (days)",
-          "battery_first_in_expensive_hours": "Battery first in expensive hours"
+          "battery_first_in_expensive_hours": "Battery first in expensive hours",
+          "reserve_margin": "Reserve margin for expensive hours"
         },
         "data_description": {
           "fallback_plan": "6 entries 'HH:MM SOC MODE' separated by ';', mode: none | grid_charge | sell",
@@ -122,7 +123,8 @@
           "min_gain": "A new plan is written only if it is cheaper than the inverter's current schedule by at least this much per 24 h.",
           "max_charge_soc": "Prelumo plans the battery up to this level on normal days (the last % charge slowly).",
           "full_charge_days": "Every N days Prelumo plans one charge to 100 % (BMS balancing), in the cheapest allowed way. 0 = off.",
-          "battery_first_in_expensive_hours": "When the buy price is above the max grid-charge price, the house runs on the battery down to min SoC - no buying from the grid to sell the battery later."
+          "battery_first_in_expensive_hours": "When the buy price is above the max grid-charge price, the house runs on the battery down to min SoC - no buying from the grid to sell the battery later.",
+          "reserve_margin": "With battery first on: the battery sells only above the forecast house and heat-pump need for the remaining expensive hours, plus this margin."
         }
       }
     },

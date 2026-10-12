@@ -88,6 +88,7 @@ OPT_MIN_GAIN: Final = "min_gain"
 OPT_MAX_CHARGE_SOC: Final = "max_charge_soc"
 OPT_FULL_CHARGE_DAYS: Final = "full_charge_days"
 OPT_BATTERY_FIRST: Final = "battery_first_in_expensive_hours"
+OPT_RESERVE_MARGIN: Final = "reserve_margin"
 
 OPTION_DEFAULTS: Final = {
     OPT_CAPACITY: 20.0,
@@ -122,6 +123,7 @@ OPTION_DEFAULTS: Final = {
     OPT_MAX_CHARGE_SOC: 98,  # everyday charge limit; the last % charge slowly
     OPT_FULL_CHARGE_DAYS: 7,  # full 100 % charge every N days (BMS balancing), 0 = off
     OPT_BATTERY_FIRST: True,  # expensive hours: house from battery, never buy to sell later
+    OPT_RESERVE_MARGIN: 30,  # %, extra on top of the forecast house need in expensive hours
 }
 
 # --- runtime switches / select (restored state) ------------------------

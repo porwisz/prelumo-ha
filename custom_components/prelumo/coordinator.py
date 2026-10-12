@@ -28,7 +28,7 @@ from .const import (
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_BATTERY_FIRST, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
+    OPT_BATTERY_FIRST, OPT_RESERVE_MARGIN, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
     STORAGE_VERSION, UPDATE_INTERVAL,
 )
 from .core.balance import FULL_SOC, FullChargeTracker
@@ -114,8 +114,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self._plan_lock = asyncio.Lock()
         self._yesterday_pv_forecast: dict[datetime, float] = {}
         self._today_pv_forecast: dict[datetime, float] = {}
-        self._sell_seen: dict[datetime, float] = {}
-        self._last_recover: datetime | None = None  # hourly RCE, kept ~3 days for actual cost
+        self._sell_seen: dict[datetime, float] = {}  # hourly RCE, kept ~3 days for actual cost
+        self._last_recover: datetime | None = None
+        self._models_ready = False  # load profile / heat pump / EV models are not persisted
         self._unsub: list = []
 
     # --- options -------------------------------------------------------
@@ -142,6 +143,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             capacity_kwh=float(o[OPT_CAPACITY]), min_soc=int(o[OPT_MIN_SOC]), max_soc=max_soc,
             require_full=due,
             battery_first_above=self.max_grid_charge_price() if o[OPT_BATTERY_FIRST] else None,
+            reserve_margin=float(o[OPT_RESERVE_MARGIN]) / 100,
             max_charge_kw=float(o[OPT_MAX_CHARGE]), max_discharge_kw=float(o[OPT_MAX_DISCHARGE]),
             roundtrip_efficiency=float(o[OPT_EFFICIENCY]), wear_cost=float(o[OPT_WEAR]),
             grid_import_kw=float(o[OPT_GRID_IMPORT]), grid_export_kw=float(o[OPT_GRID_EXPORT]),
@@ -302,11 +304,16 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                       self.load_profile.sample_hours, self.hp_model.coef, len(self.ev_pattern.by_weekday))
 
     async def _learn_daily(self, now: datetime) -> None:
-        """Once per day: PV bias from yesterday + metered actual cost for the shadow ledger."""
+        """Models: at every start (they live in memory only) and once per day after that.
+
+        Once per day also: PV bias from yesterday + metered actual cost for the shadow ledger.
+        """
         today = now.date().isoformat()
+        if not self._models_ready or self.last_learn != today:
+            await self._learn(now)
+            self._models_ready = True
         if self.last_learn == today:
             return
-        await self._learn(now)
         y0 = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
         y1 = y0 + timedelta(days=1)
         actual_pv = await io.hourly_kwh(self.hass, self.inv.pv, y0, y1)

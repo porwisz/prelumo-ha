@@ -51,6 +51,9 @@ class BatteryParams:
     # Above this buy price the battery covers the house first: no buying for the house while the
     # battery is above min SoC (no "buy expensive to sell later"). None = off.
     battery_first_above: float | None = None
+    # With battery-first: sell only above a reserve for the house in the following expensive
+    # hours (forecast deficit until the next cheap hour) x (1 + margin).
+    reserve_margin: float = 0.3
 
     @property
     def eta(self) -> float:
@@ -114,8 +117,25 @@ class _Step:
     battery_export: float
 
 
+def expensive_reserve(hours: list[HourInput], p: BatteryParams) -> list[float]:
+    """Battery-side kWh to keep after each hour for the house in the following expensive hours."""
+    out = [0.0] * len(hours)
+    if p.battery_first_above is None:
+        return out
+    acc = 0.0
+    for t in range(len(hours) - 1, -1, -1):
+        out[t] = acc * (1 + p.reserve_margin) / p.eta
+        h = hours[t]
+        if h.buy > p.battery_first_above + 1e-9:
+            acc += max(0.0, h.load - h.pv)  # house + heat pump, without the EV
+        else:
+            acc = 0.0  # a cheap hour ends the expensive run
+    return out
+
+
 def _transition(
-    p: BatteryParams, h: HourInput, s0: int, s1: int, strategy: Strategy, may_export: bool
+    p: BatteryParams, h: HourInput, s0: int, s1: int, strategy: Strategy, may_export: bool,
+    reserve: float = 0.0,
 ) -> _Step | None:
     delta = (s1 - s0) / 100 * p.capacity_kwh  # battery side
     if delta > 0:
@@ -154,6 +174,8 @@ def _transition(
     battery_export = max(0.0, delivered - deficit)
     if battery_export > EPS and (strategy is Strategy.SELF_CONSUMPTION or not may_export or s1 < p.min_sell_soc):
         return None
+    if battery_export > EPS and (s1 - p.min_soc) / 100 * p.capacity_kwh < reserve - 1e-9:
+        return None  # keep energy for the house in the coming expensive hours
     if grid_charge > EPS and p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9:
         return None
     if ev_blocked and delivered > base_deficit + EPS:
@@ -202,6 +224,7 @@ def optimize(
         return -(s - lo) / 100 * p.capacity_kwh * terminal_price
 
     T = len(hours)
+    reserve = expensive_reserve(hours, p)
     # State = (soc, holds grid energy, has reached full). The "full" flag is only tracked when a
     # periodic full charge (BMS balancing) is required; otherwise it stays True.
     track_full = p.require_full
@@ -231,7 +254,7 @@ def optimize(
                     may_export = arbitrage or not tainted
                     best = None
                     for s1 in grid:
-                        st = _transition(p, h, s0, s1, strategy, may_export)
+                        st = _transition(p, h, s0, s1, strategy, may_export, reserve[t])
                         if st is None:
                             continue
                         nt = tainted or st.grid_charge > EPS
