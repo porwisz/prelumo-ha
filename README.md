@@ -37,6 +37,9 @@ Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo 
 
 - **Maks. cena ładowania z sieci** — bateria ładuje się z sieci tylko, gdy cena zakupu ≤ limit
   (domyślnie 0 = najniższa cena z taryfy G13, czyli w praktyce tylko strefa pozaszczytowa).
+- **Bateria najpierw zasila dom w drogich godzinach** (domyślnie wł.) — gdy cena zakupu jest
+  wyższa niż maks. cena ładowania z sieci, dom zasila bateria aż do min. SoC; Prelumo nie kupuje
+  prądu po to, żeby sprzedać baterię później. Sprzedawane jest tylko to, co zostanie.
 - **Min. SoC przy sprzedaży** (domyślnie 20%) — bateria nie sprzedaje do sieci poniżej tego poziomu;
   slot Sell nigdy nie dostaje niższego progu.
 

@@ -48,6 +48,9 @@ class BatteryParams:
     max_grid_charge_price: float | None = None  # PLN/kWh; no grid charging above it (None = no limit)
     min_sell_soc: int = 20  # %; battery never exports below this SoC
     require_full: bool = False  # periodic 100% charge due: plan must reach max_soc once
+    # Above this buy price the battery covers the house first: no buying for the house while the
+    # battery is above min SoC (no "buy expensive to sell later"). None = off.
+    battery_first_above: float | None = None
 
     @property
     def eta(self) -> float:
@@ -131,16 +134,32 @@ def _transition(
 
     grid_charge = max(0.0, bus - surplus) if bus > 0 else 0.0
     delivered = -bus if bus < 0 else 0.0
-    battery_export = max(0.0, delivered - deficit)
+    ev_blocked = h.ev > EPS and not h.ev_battery_allowed
+    rounding = 0.0  # battery energy the SoC grid forces beyond the need (not sold, not to EV)
 
+    # Expensive hour + battery-first: the battery covers the house fully (down to min SoC)
+    if p.battery_first_above is not None and h.buy > p.battery_first_above + 1e-9:
+        if bus > 0 and s0 > p.min_soc and base_deficit > EPS:
+            return None  # charging while the house would buy at this price
+        if bus <= 0:
+            need = min(base_deficit if ev_blocked else deficit, p.max_discharge_kw * p.eta)
+            if s1 > p.min_soc and delivered < need - EPS:
+                return None
+            step_kwh = max(1, p.soc_step) / 100 * p.capacity_kwh * p.eta
+            over = delivered - need
+            if EPS < over <= step_kwh + EPS:  # SoC-grid rounding, never a "sale"
+                rounding = over
+                delivered = need
+
+    battery_export = max(0.0, delivered - deficit)
     if battery_export > EPS and (strategy is Strategy.SELF_CONSUMPTION or not may_export or s1 < p.min_sell_soc):
         return None
     if grid_charge > EPS and p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9:
         return None
-    if h.ev > EPS and not h.ev_battery_allowed and delivered > base_deficit + EPS:
+    if ev_blocked and delivered > base_deficit + EPS:
         return None
 
-    net = total_load - h.pv + bus
+    net = total_load - h.pv + bus + rounding
     imp, exp = max(0.0, net), max(0.0, -net)
     penalty = 0.0
     if imp > p.grid_import_kw + 1e-9:

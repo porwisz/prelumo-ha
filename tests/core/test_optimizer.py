@@ -223,3 +223,29 @@ def test_expensive_hour_battery_covers_house_down_to_min_soc():
             HourPlan(cheap[2].start, 80, 60, HourMode.NORMAL, 0, 0, 0, 0, 0)]
     v2 = stored_energy_value(hold, cheap, 0, P)
     assert hour_setting(hold[0], cheap[0], v2, P) == Setting(HourMode.NORMAL, 80)
+
+
+def test_battery_first_in_expensive_hours():
+    """Regression (user report): 16-18 at 1.45 the battery was held at 98% and the house bought
+    from the grid, to sell the energy at 18-20 for RCE 1.53-1.65. With battery-first on, the
+    house runs on the battery in expensive hours and only the rest is sold.
+    """
+    from dataclasses import replace
+    from core.compress import compress, to_day_plan
+    buy = [0.65, 0.65] + [1.45] * 5 + [0.65] * 3
+    sell = [0.6, 0.7, 0.9, 1.24, 1.53, 1.65, 1.41, 1.0, 0.9, 0.8]
+    load = [1.0] * 10
+    hrs = day(buy, sell, load=load)
+    base = replace(P, max_soc=98, max_grid_charge_price=0.65, min_sell_soc=20)
+    off = optimize(hrs, 98, base, Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert off.hours[2].grid_import > 0.5  # old behaviour: buys at 1.45 to sell later
+    on_p = replace(base, battery_first_above=0.65)
+    on = optimize(hrs, 98, on_p, Strategy.MAX_GRID_TRADING, arbitrage=True)
+    for i in (2, 3):  # 16:00-18:00
+        assert on.hours[i].grid_import < 0.06, on.hours[i]
+    assert any(h.battery_export > 1 for h in on.hours[4:6])  # still sells what is left
+    segs, _ = compress(on.hours, hrs, 98, on_p)
+    plan = to_day_plan(segs, hrs, on_p)
+    for slot in plan.slots:
+        if slot.start // 100 in (2, 3) and slot.mode.value == "none":
+            assert slot.soc == on_p.min_soc

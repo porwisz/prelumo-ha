@@ -59,6 +59,7 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "grid_arbitrage": c.arbitrage,
         "max_grid_charge_price": round(c.max_grid_charge_price(), 3),
         "min_sell_soc": int(c.opt["min_sell_soc"]),
+        "battery_first_in_expensive_hours": bool(c.opt["battery_first_in_expensive_hours"]),
         "shadow_mode": c.shadow,
         "slots": ps.proposed.as_list() if ps.proposed else None,
         "hourly": [h.as_dict() for h in r.optimum.hours] if r else None,

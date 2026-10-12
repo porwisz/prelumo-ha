@@ -59,6 +59,10 @@ def hour_setting(
         return Setting(h.mode, h.soc_end)
     if h.mode is HourMode.SELL:
         return Setting(h.mode, h.soc_end)
+    if (hour is not None and p is not None and p.battery_first_above is not None
+            and hour.buy > p.battery_first_above + 1e-9
+            and (hour.ev <= 0.05 or hour.ev_battery_allowed)):
+        return Setting(HourMode.NORMAL, p.min_soc)  # expensive hour: battery covers the house
     if hour is not None and keep_value is not None and p is not None and hour.buy >= keep_value:
         # grid power now costs more than the stored energy will ever earn: never import while
         # the battery has energy - floor at min SoC, not at the forecast trajectory (a higher
