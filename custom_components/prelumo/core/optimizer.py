@@ -54,6 +54,8 @@ class BatteryParams:
     # With battery-first: sell only above a reserve for the house in the following expensive
     # hours (forecast deficit until the next cheap hour) x (1 + margin).
     reserve_margin: float = 0.3
+    # With arbitrage on: grid-charged energy is sold only if it earns at least this per kWh
+    arbitrage_min_margin: float = 0.0
 
     @property
     def eta(self) -> float:
@@ -272,10 +274,12 @@ def optimize(
                         if st is None:
                             continue
                         nt = tainted or st.grid_charge > EPS
-                        if s1 <= lo or arbitrage:
+                        if s1 <= lo:
                             nt = False
                         nf = full or done(s1)
-                        v = st.cost + V[t + 1][(s1, nt, nf)]
+                        # hurdle (objective only): selling grid-charged energy must earn the margin
+                        hurdle = p.arbitrage_min_margin * st.battery_export if tainted else 0.0
+                        v = st.cost + hurdle + V[t + 1][(s1, nt, nf)]
                         if best is None or v < best[0]:
                             best = (v, s1, nt, nf, st)
                     if best is None:  # should not happen: idle is always allowed unless limits

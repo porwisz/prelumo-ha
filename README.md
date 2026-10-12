@@ -64,6 +64,8 @@ Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo 
 - **Arbitraż z siecią** (osobny przełącznik, domyślnie wył.) — czy energię pobraną z sieci wolno
   potem sprzedać. Gdy wyłączony, po ładowaniu z sieci bateria nie eksportuje, dopóki nie zejdzie
   do min SoC.
+- **Min. zysk z arbitrażu** (domyślnie 0,50 zł/kWh) — przy włączonym arbitrażu energia z sieci jest
+  sprzedawana tylko, gdy zarobi co najmniej tyle na kWh ponad zakup, straty i zużycie baterii.
 
 ## Encje
 

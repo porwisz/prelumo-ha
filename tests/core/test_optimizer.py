@@ -400,3 +400,19 @@ def test_sell_export_capped_by_inverter_sell_limit():
     simulate(hrs, [Setting(HourMode.SELL, 20, 10.0), Setting(HourMode.NORMAL, 20)], 98, p, detail=detail)
     assert detail[0]["export"] <= 5.39 + 1e-6 and detail[0]["import"] < 0.05
     assert detail[0]["soc"] > 60  # ~6.4 kWh out of 20 kWh, not 10 kWh
+
+
+def test_arbitrage_needs_min_margin():
+    """Regression (user report): buy at 0.63 at 21:00, sell at RCE 0.93 at 22:00 - a full cycle
+    for ~0.10 zl/kWh. With a 0.5 zl/kWh minimum margin this is not done; a big spread still is."""
+    from dataclasses import replace
+    buy = [0.63, 0.63, 0.63, 0.63]
+    p = replace(P, min_soc=20, max_soc=98, min_sell_soc=20, wear_cost=0.1, max_grid_charge_price=0.63)
+    small = day(buy, [0.6, 0.6, 0.93, 0.6], load=[0.5] * 4)
+    r = optimize(small, 20, replace(p, arbitrage_min_margin=0.0), Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert any(h.battery_export > 1 for h in r.hours)
+    r = optimize(small, 20, replace(p, arbitrage_min_margin=0.5), Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert all(h.battery_export < 0.5 for h in r.hours)
+    big = day(buy, [0.6, 0.6, 1.8, 0.6], load=[0.5] * 4)
+    r = optimize(big, 20, replace(p, arbitrage_min_margin=0.5), Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert any(h.battery_export > 1 for h in r.hours)

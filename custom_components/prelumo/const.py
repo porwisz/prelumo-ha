@@ -89,6 +89,7 @@ OPT_MAX_CHARGE_SOC: Final = "max_charge_soc"
 OPT_FULL_CHARGE_DAYS: Final = "full_charge_days"
 OPT_BATTERY_FIRST: Final = "battery_first_in_expensive_hours"
 OPT_RESERVE_MARGIN: Final = "reserve_margin"
+OPT_ARBITRAGE_MARGIN: Final = "arbitrage_min_margin"
 OPT_SLOT_WINDOW: Final = "slot_window_hours"
 
 OPTION_DEFAULTS: Final = {
@@ -124,6 +125,7 @@ OPTION_DEFAULTS: Final = {
     OPT_MAX_CHARGE_SOC: 98,  # everyday charge limit; the last % charge slowly
     OPT_FULL_CHARGE_DAYS: 7,  # full 100 % charge every N days (BMS balancing), 0 = off
     OPT_BATTERY_FIRST: True,  # expensive hours: house from battery, never buy to sell later
+    OPT_ARBITRAGE_MARGIN: 0.5,  # PLN/kWh, min. profit to sell energy bought from the grid
     OPT_RESERVE_MARGIN: 30,  # %, extra on top of the forecast house need in expensive hours
     OPT_SLOT_WINDOW: 18,  # h; slots are built from the next N hours, the optimiser still sees the horizon
 }
