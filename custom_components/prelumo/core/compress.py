@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from .optimizer import BatteryParams, HourInput, HourMode, HourPlan
+from .optimizer import BatteryParams, HourInput, HourMode, HourPlan, expensive_reserve
 from .plan import MAX_POWER_W, SLOT_COUNT, DayPlan, Slot, SlotMode
 
 CAP_PENALTY = 1e4  # PLN; makes a merge that grid-charges above the price cap unacceptable
@@ -92,7 +92,12 @@ def simulate(
     sell_kw = sell_power_kw if sell_power_kw is not None else p.max_discharge_kw
     cost = 0.0
     traj = []
-    for h, st in zip(hours, settings):
+    sold_since_cheap = 0.0  # battery energy exported since the last cheap hour
+    reserve = expensive_reserve(hours, p)
+    for i, (h, st) in enumerate(zip(hours, settings)):
+        expensive = p.battery_first_above is not None and h.buy > p.battery_first_above + 1e-9
+        if not expensive:
+            sold_since_cheap = 0.0
         target = st.soc / 100 * cap
         hi = p.max_soc / 100 * cap
         lo = max(p.min_soc / 100 * cap, target) if st.mode is not HourMode.GRID_CHARGE else p.min_soc / 100 * cap
@@ -100,6 +105,10 @@ def simulate(
         bus = 0.0  # + charging
         if st.mode is HourMode.SELL:
             lo = max(lo, p.min_sell_soc / 100 * cap)
+            if target < p.min_soc / 100 * cap + reserve[i] - 0.5 * max(1, p.soc_step) / 100 * cap:
+                # hard rule (reserve), independent of the forecast SoC: a sell slot may never
+                # sell below what the house needs in the following expensive hours
+                cost += CAP_PENALTY
         # the inverter charges from the grid whenever a grid-charge slot is active - it knows
         # nothing about prices - so a merge that charges above the cap must be rejected
         over_cap = p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9
@@ -128,6 +137,12 @@ def simulate(
         soc += bus * eta if bus > 0 else bus / eta
         g = net + bus
         imp, exp = max(0.0, g), min(max(0.0, -g), p.grid_export_kw)
+        if bus < 0:
+            sold_since_cheap += max(0.0, min(-bus, -g))  # the part of the discharge that was exported
+        house_import = min(imp, max(0.0, h.load - h.pv))
+        if expensive and sold_since_cheap > 0.1 and house_import > 0.1:
+            # hard rule (reserve): battery energy was sold and now the house buys at this price
+            cost += CAP_PENALTY
         wear = (-bus / eta) * p.wear_cost if bus < 0 else 0.0
         cost += imp * h.buy - (exp * h.sell if h.sell > 0 else 0.0) + wear
         traj.append(soc / cap * 100)

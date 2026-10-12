@@ -301,3 +301,30 @@ def test_reserve_for_expensive_hours_after_selling():
     assert r.hours[2].soc_end >= p.min_soc + res[2] / p.capacity_kwh * 100 - P.soc_step
     off = optimize(hrs, 90, replace(p, battery_first_above=None), Strategy.MAX_GRID_TRADING, arbitrage=True)
     assert off.hours[3].grid_import > 1  # without the rule it sells everything and buys back
+
+
+def test_sell_slots_not_merged_through_the_reserve():
+    """Regression (user report, 2nd): sell 19:00 (floor 28%) and 20:00 (floor 20%) were merged
+    into one 'sell to 20%' slot - the inverter would sell everything at 19:00 and the house would
+    buy at 20:00. A sale followed by house import in the same expensive run is a hard rule.
+    """
+    from dataclasses import replace
+    from core.compress import Setting, simulate
+    hrs = day([1.5, 1.5, 0.63], [1.65, 1.41, 0.9], load=[0.5, 1.5, 0.5])
+    p = replace(P, max_soc=98, min_sell_soc=20, battery_first_above=0.63, max_grid_charge_price=0.63)
+    split = [Setting(HourMode.SELL, 30), Setting(HourMode.NORMAL, 10), Setting(HourMode.NORMAL, 10)]
+    merged = [Setting(HourMode.SELL, 20), Setting(HourMode.SELL, 20), Setting(HourMode.NORMAL, 10)]
+    assert simulate(hrs, merged, 60, p)[0] > 5e3  # sells to 20%, then buys at 1.5
+    assert simulate(hrs, split, 60, p)[0] < 1e3
+
+
+def test_sell_slot_floor_respects_reserve_regardless_of_forecast_soc():
+    from dataclasses import replace
+    from core.compress import Setting, simulate
+    hrs = day([1.5, 1.5, 0.63], [1.65, 1.41, 0.9], load=[0.5, 3.0, 0.5])
+    p = replace(P, max_soc=98, min_sell_soc=20, battery_first_above=0.63, max_grid_charge_price=0.63)
+    # floor 20 % at 19:00 would leave nothing for the 3 kWh at 20:00 if the SoC were lower
+    low_floor = [Setting(HourMode.SELL, 20), Setting(HourMode.NORMAL, 10), Setting(HourMode.NORMAL, 10)]
+    assert simulate(hrs, low_floor, 98, p)[0] > 5e3
+    ok_floor = [Setting(HourMode.SELL, 40), Setting(HourMode.NORMAL, 10), Setting(HourMode.NORMAL, 10)]
+    assert simulate(hrs, ok_floor, 98, p)[0] < 1e3
