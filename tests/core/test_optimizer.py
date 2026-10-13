@@ -462,3 +462,21 @@ def test_adjacent_grid_charge_slots_are_joined():
     segs, _ = compress(plan, hrs, 30, p, window=8)
     charge = {s.setting.soc for s in segs if s.setting.mode is HourMode.GRID_CHARGE}
     assert charge == {48}, segs
+
+
+def test_grid_energy_not_used_in_cheap_hours():
+    """Regression (user report): energy charged from the grid fed the house at night (cheap
+    hours) - a battery cycle to save the cheap price makes no sense; it waits for 7-13."""
+    from dataclasses import replace
+    from core.compress import Setting, simulate
+    buy = [0.63] * 4 + [0.9048] * 4
+    hrs = day(buy, [0.5] * 8, load=[0.6] * 8)
+    p = replace(P, min_soc=20, max_soc=98, soc_step=2, max_grid_charge_price=0.63,
+                battery_first_above=0.63)
+    r = optimize(hrs, 40, p, Strategy.SELF_CONSUMPTION, grid_energy=True)
+    assert all(h.soc_end >= 38 for h in r.hours[:4]), [h.soc_end for h in r.hours]
+    free = optimize(hrs, 40, p, Strategy.SELF_CONSUMPTION, grid_energy=False)  # PV energy: free use
+    assert sum(h.grid_import for h in free.hours[:4]) <= sum(h.grid_import for h in r.hours[:4])
+    drain = [Setting(HourMode.NORMAL, 20)] * 8
+    assert simulate(hrs, drain, 40, p, grid_energy=True)[0] > 5e3
+    assert simulate(hrs, drain, 40, p, grid_energy=False)[0] < 1e3

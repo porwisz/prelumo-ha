@@ -143,7 +143,7 @@ def expensive_reserve(hours: list[HourInput], p: BatteryParams) -> list[float]:
 
 def _transition(
     p: BatteryParams, h: HourInput, s0: int, s1: int, strategy: Strategy, may_export: bool,
-    reserve: float = 0.0,
+    reserve: float = 0.0, grid_energy: bool = False,
 ) -> _Step | None:
     delta = (s1 - s0) / 100 * p.capacity_kwh  # battery side
     if delta > 0:
@@ -182,6 +182,12 @@ def _transition(
                 rounding = over
                 delivered = need
 
+    if (grid_energy and p.max_grid_charge_price is not None
+            and h.buy <= p.max_grid_charge_price + 1e-9 and min(delivered, deficit) > EPS):
+        # cheap hour: energy bought from the grid waits for the expensive hours - a battery
+        # cycle to save the cheap price makes no sense (rounding below one SoC step is allowed)
+        if min(delivered, deficit) > max(1, p.soc_step) / 100 * p.capacity_kwh * p.eta + EPS:
+            return None
     battery_export = max(0.0, delivered - deficit)
     if battery_export > EPS and h.sell <= 0:
         # no (or unknown) sell price: never a sale; up to one SoC step is grid rounding
@@ -226,6 +232,7 @@ def optimize(
     strategy: Strategy = Strategy.SELF_CONSUMPTION,
     arbitrage: bool = False,
     terminal_price: float | None = None,
+    grid_energy: bool = False,
 ) -> OptimizeResult:
     if not hours:
         return OptimizeResult([], 0.0, 0.0, strategy, arbitrage)
@@ -265,7 +272,7 @@ def optimize(
         states = grid if t > 0 else [start_soc]
         for s0 in states:
             for tainted in (False, True):
-                if t == 0 and tainted:
+                if t == 0 and tainted != grid_energy:
                     continue
                 for full in fulls:
                     if t == 0 and full != done(start_soc):
@@ -273,7 +280,7 @@ def optimize(
                     may_export = arbitrage or not tainted
                     best = None
                     for s1 in grid:
-                        st = _transition(p, h, s0, s1, strategy, may_export, reserve[t])
+                        st = _transition(p, h, s0, s1, strategy, may_export, reserve[t], tainted)
                         if st is None:
                             continue
                         nt = tainted or st.grid_charge > EPS
@@ -291,7 +298,7 @@ def optimize(
                     choice[t][(s0, tainted, full)] = (best[1], best[2], best[3], best[4])
 
     plan: list[HourPlan] = []
-    s_, tainted, full = start_soc, False, done(start_soc)
+    s_, tainted, full = start_soc, grid_energy, done(start_soc)
     total = 0.0
     for t in range(T):
         s1, nt, nf, st = choice[t][(s_, tainted, full)]

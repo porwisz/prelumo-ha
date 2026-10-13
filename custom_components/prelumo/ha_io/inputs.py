@@ -83,6 +83,14 @@ class InverterEntities:
         return self.s("suma_siec_oddanie")
 
     @property
+    def battery_power(self) -> str:
+        return self.s("bateria_moc")  # W, negative = charging
+
+    @property
+    def house_total(self) -> str:
+        return self.s("suma_dom")
+
+    @property
     def max_sell_power(self) -> str:
         return self.s("ust_maks_moc_sprzedazy")
 
@@ -243,6 +251,37 @@ async def last_hour_at_or_above(
             ts = r["start"]
             last = dt_util.as_local(dt_util.utc_from_timestamp(ts) if isinstance(ts, (int, float)) else ts)
     return last + timedelta(hours=1) if last else None
+
+
+async def grid_charged_since_low(
+    hass: HomeAssistant, inv: "InverterEntities", low_soc: float, now: datetime
+) -> bool:
+    """Has the battery taken energy from the grid since it was last at ``low_soc``?
+
+    Bootstrap for the "grid energy in the battery" flag: since the last hour the SoC touched
+    the low level (48 h back at most), grid import above the house consumption went into the
+    battery.
+    """
+    start = now - timedelta(hours=48)
+    ids = {inv.soc, inv.grid_import_total, inv.house_total}
+    if any(not hass.states.get(e) for e in ids):
+        return False
+    stats = await get_instance(hass).async_add_executor_job(
+        statistics_during_period, hass, start, now, ids, "hour", None, {"min", "change"}
+    )
+    low_at = start
+    for r in stats.get(inv.soc, []):
+        if r.get("min") is not None and float(r["min"]) <= low_soc:
+            low_at = _stat_start(r)
+    imp = {_stat_start(r): float(r.get("change") or 0.0) for r in stats.get(inv.grid_import_total, [])}
+    house = {_stat_start(r): float(r.get("change") or 0.0) for r in stats.get(inv.house_total, [])}
+    to_battery = sum(max(0.0, v - house.get(t, 0.0)) for t, v in imp.items() if t > low_at)
+    return to_battery > 0.5
+
+
+def _stat_start(r: dict) -> datetime:
+    ts = r["start"]
+    return dt_util.as_local(dt_util.utc_from_timestamp(ts) if isinstance(ts, (int, float)) else ts)
 
 
 async def hourly_energy_change(

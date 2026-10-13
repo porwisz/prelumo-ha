@@ -100,6 +100,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         # runtime controls (restored by entities)
         self.strategy = Strategy.SELF_CONSUMPTION
         self.arbitrage = False
+        self.grid_energy: bool | None = None  # battery holds energy bought from the grid
         self.shadow = True
         self.auto_mode = True
         # learned models
@@ -191,6 +192,15 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.ev_pattern = EvPattern.from_dict(stored.get("ev_pattern"))
         self.ledger = ShadowLedger.from_dict(stored.get("shadow"))
         self.last_learn = stored.get("last_learn")
+        self.grid_energy = stored.get("grid_energy")
+        if self.grid_energy is None:  # first run: look it up in the history
+            try:
+                self.grid_energy = await io.grid_charged_since_low(
+                    self.hass, self.inv, float(self.opt[OPT_MIN_SOC]) + 1, dt_util.now()
+                )
+            except Exception as err:  # noqa: BLE001 - recorder may not be ready
+                _LOGGER.debug("Grid-energy history lookup failed: %s", err)
+                self.grid_energy = False
         self.guard.history = [dt for t in stored.get("writes", []) if (dt := dt_util.parse_datetime(t))]
         if stored.get("last_full"):
             self.full.last_full = dt_util.parse_datetime(stored["last_full"])
@@ -222,6 +232,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 "last_learn": self.last_learn,
                 "writes": [t.isoformat() for t in self.guard.history],
                 "last_full": self.full.last_full.isoformat() if self.full.last_full else None,
+                "grid_energy": self.grid_energy,
             },
             5,
         )
@@ -240,6 +251,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                     self.hass, self.async_replan(), f"{DOMAIN}_after_full_charge"
                 )
         self._maybe_recover(now)
+        self._track_grid_energy(plan, now, data.soc)
         if plan is not None:
             data.active_index = plan.active_index(now)
             data.next_change, _ = plan.next_change(now)
@@ -259,6 +271,20 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                     data.mode_action = "error"
                     _LOGGER.warning("Work mode change failed: %s", err)
         return data
+
+    @callback
+    def _track_grid_energy(self, plan: DayPlan | None, now: datetime, soc: float | None) -> None:
+        """Battery holds grid energy: set while charging in a grid-charge slot, cleared at min SoC."""
+        new = self.grid_energy
+        if soc is not None and soc <= float(self.opt[OPT_MIN_SOC]) + 1:
+            new = False
+        elif plan is not None and plan.slots[plan.active_index(now)].mode.value == "grid_charge":
+            power = io.state_float(self.hass, self.inv.battery_power)
+            if power is not None and power < -300:
+                new = True
+        if new != self.grid_energy:
+            self.grid_energy = new
+            self._save()
 
     @callback
     def _maybe_recover(self, now: datetime) -> None:
@@ -404,7 +430,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         if outage:
             ev.battery_allowed = [True] * len(hours)
 
-        inp = PlannerInputs(now, soc, pv, base, hp, ev, sell_h, self.tariff(), horizon, int(o[OPT_SLOT_WINDOW]))
+        inp = PlannerInputs(now, soc, pv, base, hp, ev, sell_h, self.tariff(), horizon, int(o[OPT_SLOT_WINDOW]),
+                            bool(self.grid_energy))
         params = self.battery_params()
         result = await self.hass.async_add_executor_job(
             run_planner, inp, params, self.strategy, self.arbitrage, current

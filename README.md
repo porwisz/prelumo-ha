@@ -44,6 +44,10 @@ Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo 
 - **Margines rezerwy na drogie godziny** (domyślnie 30%) — przy „bateria najpierw” sprzedaż jest
   dozwolona tylko ponad prognozowane zużycie domu i pompy ciepła w pozostałych drogich godzinach
   (do najbliższej taniej godziny) plus ten margines. Nie ma „sprzedaj o 19, kup o 20”.
+- **Energia z sieci czeka na drogie godziny** — w taniej strefie bateria nie zasila domu energią
+  kupioną z sieci (bez cyklu baterii dla taniego prądu). Prelumo śledzi, czy w baterii jest energia
+  z sieci (ładowanie w slocie z sieci ustawia, zejście do min. SoC kasuje); energia z PV jest
+  używana normalnie. Atrybut `grid_energy_in_battery` w `sensor.prelumo_proposed_plan`.
 - **Min. SoC przy sprzedaży** (domyślnie 20%) — bateria nie sprzedaje do sieci poniżej tego poziomu;
   slot Sell nigdy nie dostaje niższego progu.
 

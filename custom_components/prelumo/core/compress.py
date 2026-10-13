@@ -89,6 +89,7 @@ def simulate(
     sell_power_kw: float | None = None,
     detail: list[dict] | None = None,
     powers: dict[int, float] | None = None,
+    grid_energy: bool = False,
 ) -> tuple[float, list[float]]:
     """Inverter behaviour per hour; returns (cost, soc trajectory %).
 
@@ -184,6 +185,16 @@ def simulate(
         exp = min(exp, p.grid_export_kw)
         if bus < 0:
             sold_since_cheap += max(0.0, min(-bus, -g))  # the part of the discharge that was exported
+        cheap = p.max_grid_charge_price is not None and h.buy <= p.max_grid_charge_price + 1e-9
+        to_house = min(-bus, max(0.0, net)) if bus < 0 else 0.0
+        if grid_energy and cheap and to_house > 0.1:
+            # hard rule: grid energy in the battery waits for the expensive hours (no cycle to
+            # save the cheap price)
+            cost += CAP_PENALTY
+        if st.mode is HourMode.GRID_CHARGE and bus > 0:
+            grid_energy = True
+        if soc <= p.min_soc / 100 * cap + 0.1:
+            grid_energy = False
         house_import = min(imp, max(0.0, h.load - h.pv))
         if expensive and sold_since_cheap > 0.1 and house_import > 0.1:
             # hard rule (reserve): battery energy was sold and now the house buys at this price
@@ -242,6 +253,7 @@ def compress(
     params: BatteryParams,
     slots: int = SLOT_COUNT,
     window: int = 24,
+    grid_energy: bool = False,
 ) -> tuple[list[Segment], float]:
     """Greedy cost-aware merge of hourly settings into ``slots`` segments (first 24 h)."""
     n = min(window, len(plan))
@@ -255,7 +267,7 @@ def compress(
             segs.append(Segment(i, 1, st))
 
     def cost_of(ss: list[Segment]) -> float:
-        return simulate(hours, _expand(ss), soc_now, params)[0]
+        return simulate(hours, _expand(ss), soc_now, params, grid_energy=grid_energy)[0]
 
     current = cost_of(segs)
     while len(segs) > slots:
@@ -305,7 +317,7 @@ def compress(
     while changed and len(segs) < slots:
         changed = False
         detail: list[dict] = []
-        simulate(hours, _expand(segs), soc_now, params, detail=detail)
+        simulate(hours, _expand(segs), soc_now, params, detail=detail, grid_energy=grid_energy)
         for i, sg in enumerate(segs):
             if sg.setting.mode is not HourMode.SELL or sg.length < 2:
                 continue
