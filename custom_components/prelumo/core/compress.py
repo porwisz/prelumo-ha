@@ -232,6 +232,9 @@ def _candidates(a: Setting, b: Setting) -> list[Setting]:
     return list(c)
 
 
+TIDY_TOLERANCE = 0.05  # PLN: a simpler schedule is worth this much
+
+
 def compress(
     plan: list[HourPlan],
     hours: list[HourInput],
@@ -277,6 +280,25 @@ def compress(
             else:
                 joined.append(s)
         segs = joined
+    # Tidy: join neighbours of the same mode when it costs (almost) nothing - e.g. grid charge
+    # to 38 %, 40 %, 48 % in three slots becomes one slot to 48 % - which frees slots below.
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(segs) - 1):
+            a, b = segs[i], segs[i + 1]
+            if a.setting.mode is not b.setting.mode:
+                continue
+            for cand in _candidates(a.setting, b.setting):
+                if cand.mode is not a.setting.mode:
+                    continue
+                trial = segs[:i] + [Segment(a.start, a.length + b.length, cand)] + segs[i + 2 :]
+                c = cost_of(trial)
+                if c <= current + TIDY_TOLERANCE:
+                    segs, current, merged = trial, c, True
+                    break
+            if merged:
+                break
     # Free slots: cut the idle tail off sell slots (e.g. sell 20:00, then the battery is at the
     # floor all night - the night part becomes a normal slot instead of Export First).
     changed = True
@@ -297,7 +319,7 @@ def compress(
             parts = ([Segment(sg.start, head_len, sg.setting)] if head_len else []) + [
                 Segment(sg.start + head_len, tail, Setting(HourMode.NORMAL, sg.setting.soc))]
             trial = segs[:i] + parts + segs[i + 1 :]
-            if len(trial) <= slots and cost_of(trial) <= current + 0.01:
+            if len(trial) <= slots and cost_of(trial) <= current + TIDY_TOLERANCE:
                 segs, current, changed = trial, cost_of(trial), True
                 break
     while len(segs) < slots:  # pad: split the longest segment

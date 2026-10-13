@@ -446,3 +446,19 @@ def test_cheap_night_charge_for_expensive_morning():
     r = optimize(hrs, 20, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
     assert any(h.mode is HourMode.GRID_CHARGE for h in r.hours[:6])
     assert sum(h.grid_import for h in r.hours[6:]) < 1.5  # < half of the 3.85 kWh morning need
+
+
+def test_adjacent_grid_charge_slots_are_joined():
+    """Grid charge to 38 %, 40 %, 48 % in three slots is one slot to 48 % at the same price."""
+    from dataclasses import replace
+    from core.compress import compress
+    from core.optimizer import HourPlan
+    buy = [0.63] * 4 + [0.9] * 4
+    hrs = day(buy, [0.5] * 8, load=[0.4] * 4 + [1.0] * 4)
+    p = replace(P, min_soc=20, max_soc=98, soc_step=2, max_grid_charge_price=0.63)
+    socs = [(30, 38), (38, 40), (40, 48), (48, 48), (48, 43), (43, 38), (38, 33), (33, 28)]
+    plan = [HourPlan(hrs[i].start, a, b, HourMode.GRID_CHARGE if i < 3 else HourMode.NORMAL,
+                     0, 0, 1 if i < 3 else 0, 0, 0) for i, (a, b) in enumerate(socs)]
+    segs, _ = compress(plan, hrs, 30, p, window=8)
+    charge = {s.setting.soc for s in segs if s.setting.mode is HourMode.GRID_CHARGE}
+    assert charge == {48}, segs
