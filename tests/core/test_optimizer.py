@@ -103,6 +103,9 @@ def test_write_guard():
     assert g.decide(a, c, D0 + timedelta(minutes=10))[1][0] == "min_interval"
     g.record(D0 + timedelta(hours=1))
     assert g.decide(a, c, D0 + timedelta(hours=3))[1][0] == "daily_write_limit"
+    # the limit resets at midnight, not 24 h after the writes
+    g.history = [D0 + timedelta(hours=22), D0 + timedelta(hours=23)]
+    assert g.decide(a, c, D0 + timedelta(hours=25))[0]
 
 
 def test_max_grid_charge_price_blocks_expensive_charging():

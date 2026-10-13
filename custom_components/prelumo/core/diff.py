@@ -53,8 +53,10 @@ class WriteGuard:
     history: list[datetime] = field(default_factory=list)
 
     def allowed(self, now: datetime) -> tuple[bool, str | None]:
-        self.history = [t for t in self.history if now - t < timedelta(days=1)]
-        if len(self.history) >= self.policy.max_writes_per_day:
+        self.history = [t for t in self.history if now - t < timedelta(days=2)]
+        # the daily limit counts writes since local midnight (not a rolling 24 h window)
+        today = [t for t in self.history if t.astimezone(now.tzinfo).date() == now.date()]
+        if len(today) >= self.policy.max_writes_per_day:
             return False, "daily_write_limit"
         if self.history and now - self.history[-1] < self.policy.min_interval:
             return False, "min_interval"
