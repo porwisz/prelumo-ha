@@ -245,7 +245,7 @@ def test_battery_first_in_expensive_hours():
     on_p = replace(base, battery_first_above=0.65)
     on = optimize(hrs, 98, on_p, Strategy.MAX_GRID_TRADING, arbitrage=True)
     for i in (2, 3):  # 16:00-18:00
-        assert on.hours[i].grid_import < 0.06, on.hours[i]
+        assert on.hours[i].grid_import < P.soc_step / 100 * P.capacity_kwh, on.hours[i]  # at most SoC-grid rounding
     assert any(h.battery_export > 1 for h in on.hours[4:6])  # still sells what is left
     segs, _ = compress(on.hours, hrs, 98, on_p)
     plan = to_day_plan(segs, hrs, on_p)
@@ -300,7 +300,7 @@ def test_reserve_for_expensive_hours_after_selling():
     assert res[3] > 3.0 * 1.3  # 20:00 itself: a sell slot drains in minutes
     assert res[4] == 0.0 and res[0] > res[2]
     r = optimize(hrs, 90, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
-    assert r.hours[3].grid_import < 0.06, r.hours[3]  # 20:00 covered by the battery
+    assert r.hours[3].grid_import < P.soc_step / 100 * P.capacity_kwh, r.hours[3]  # 20:00 covered by the battery
     assert any(h.battery_export > 1 for h in r.hours[1:3])  # still sells the surplus
     assert r.hours[2].soc_end >= p.min_soc + res[2] / p.capacity_kwh * 100 - P.soc_step
     off = optimize(hrs, 90, replace(p, battery_first_above=None), Strategy.MAX_GRID_TRADING, arbitrage=True)
@@ -432,3 +432,17 @@ def test_sell_slot_never_exports_and_imports_in_one_hour():
     cost, _ = simulate(hrs, [Setting(HourMode.SELL, 20, 10.0), Setting(HourMode.NORMAL, 20)], 26, p,
                        detail=detail)
     assert detail[0]["import"] > 0.05 and detail[0]["export"] > 0.05 and cost > 5e3
+
+
+def test_cheap_night_charge_for_expensive_morning():
+    """Regression (user report): no night charge at 0.63 for the 7-13 hours at 0.90 - SoC-grid
+    rounding wasted up to a step every expensive hour and ate the ~0.10 zl/kWh margin."""
+    from dataclasses import replace
+    buy = [0.63] * 6 + [0.9048] * 6
+    load = [0.3] * 6 + [0.25, 0.7, 0.3, 0.4, 1.2, 1.0]
+    hrs = day(buy, [0.6] * 12, load=load)
+    p = replace(P, min_soc=20, max_soc=98, soc_step=2, wear_cost=0.1, max_grid_charge_price=0.63,
+                battery_first_above=0.63, arbitrage_min_margin=0.5)
+    r = optimize(hrs, 20, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert any(h.mode is HourMode.GRID_CHARGE for h in r.hours[:6])
+    assert sum(h.grid_import for h in r.hours[6:]) < 1.5  # < half of the 3.85 kWh morning need

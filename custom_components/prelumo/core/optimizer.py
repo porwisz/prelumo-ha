@@ -171,9 +171,12 @@ def _transition(
             return None  # charging while the house would buy at this price
         if bus <= 0:
             need = min(base_deficit if ev_blocked else deficit, p.max_discharge_kw * p.eta)
-            if s1 > p.min_soc and delivered < need - EPS:
-                return None
             step_kwh = max(1, p.soc_step) / 100 * p.capacity_kwh * p.eta
+            # SoC-grid rounding either way: a shortfall below one step is bought (the inverter
+            # really covers it from the battery). Only rounding up would waste up to a step
+            # every expensive hour and make cheap-hour charging for the house look unprofitable.
+            if s1 > p.min_soc and delivered < need - step_kwh - EPS:
+                return None
             over = delivered - need
             if EPS < over <= step_kwh + EPS:  # SoC-grid rounding, never a "sale"
                 rounding = over
