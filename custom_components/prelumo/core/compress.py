@@ -94,8 +94,12 @@ def simulate(
     detail: list[dict] | None = None,
     powers: dict[int, float] | None = None,
     grid_energy: bool = False,
+    violations: list[str] | None = None,
 ) -> tuple[float, list[float]]:
     """Inverter behaviour per hour; returns (cost, soc trajectory %).
+
+    ``violations``: if given, each hard rule the schedule breaks is appended as "HH:MM rule"
+    (every one adds CAP_PENALTY to the cost).
 
     ``detail``: if given, one dict per hour is appended (what the inverter is expected to do).
     ``powers``: if given, the chosen power (kW) of each sell run, keyed by its first hour.
@@ -114,6 +118,11 @@ def simulate(
     reserve = expensive_reserve(hours, p)
     run_kw = sell_kw
     for i, (h, st) in enumerate(zip(hours, settings)):
+        def broke(rule: str, _h: HourInput = h) -> float:
+            if violations is not None:
+                violations.append(f"{_h.start:%H:%M} {rule}")
+            return CAP_PENALTY
+
         expensive = p.battery_first_above is not None and h.buy > p.battery_first_above + 1e-9
         if not expensive:
             sold_since_cheap = 0.0
@@ -139,21 +148,21 @@ def simulate(
                     powers[i] = run_kw
             if h.sell <= 0:
                 # hard rule: no Export First where the RCE price is unknown (or not positive)
-                cost += CAP_PENALTY
+                cost += broke("sell_without_price")
             if target < p.min_soc / 100 * cap + reserve[i] - 0.5 * max(1, p.soc_step) / 100 * cap:
                 # hard rule (reserve), independent of the forecast SoC: a sell slot may never
                 # sell below what the house needs in the following expensive hours
-                cost += CAP_PENALTY
+                cost += broke("sell_below_reserve")
         # the inverter charges from the grid whenever a grid-charge slot is active - it knows
         # nothing about prices - so a merge that charges above the cap must be rejected
         over_cap = p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9
         if (st.mode is HourMode.NORMAL and battery_held(h, st.soc, p)):
             # hard rule (battery first in expensive hours): no floor above min SoC there
-            cost += CAP_PENALTY
+            cost += broke("battery_held_in_expensive_hour")
         if st.mode is HourMode.GRID_CHARGE and over_cap:
             # hard rule, independent of the forecast: if the battery is lower than predicted,
             # the inverter would charge from the grid at this price (and the house runs on grid)
-            cost += CAP_PENALTY
+            cost += broke("grid_charge_above_price_cap")
         if st.mode is HourMode.GRID_CHARGE and soc < target:
             e = min(target - soc, p.max_charge_kw * eta, max_charge_kwh(soc / cap * 100, p))
             bus = e / eta
@@ -183,7 +192,7 @@ def simulate(
             if shift > 0.05:
                 # hard rule: a sell slot never exports and then buys within the same hour - it
                 # would hit its floor early and leave the house on the grid for the rest
-                cost += CAP_PENALTY
+                cost += broke("sell_then_buy_in_hour")
             imp += shift
             exp += shift
         exp = min(exp, p.grid_export_kw)
@@ -194,7 +203,7 @@ def simulate(
         if grid_energy and cheap and to_house > max(1, p.soc_step) / 100 * cap * eta + 0.1:
             # hard rule: grid energy in the battery waits for the expensive hours (no cycle to
             # save the cheap price); below one SoC step it is rounding, as in the optimiser
-            cost += CAP_PENALTY
+            cost += broke("grid_energy_used_in_cheap_hour")
         if st.mode is HourMode.GRID_CHARGE and bus > 0:
             grid_energy = True
         if soc <= p.min_soc / 100 * cap + 0.1:
@@ -202,7 +211,7 @@ def simulate(
         house_import = min(imp, max(0.0, h.load - h.pv))
         if expensive and sold_since_cheap > 0.1 and house_import > 0.1:
             # hard rule (reserve): battery energy was sold and now the house buys at this price
-            cost += CAP_PENALTY
+            cost += broke("house_buys_after_sale")
         wear = (-bus / eta) * p.wear_cost if bus < 0 else 0.0
         hour_cost = imp * h.buy - (exp * h.sell if h.sell > 0 else 0.0) + wear
         cost += hour_cost
@@ -220,6 +229,8 @@ def simulate(
     if p.require_full and hours and max(traj, default=0.0) < p.max_soc - 1:
         # the periodic 100 % charge is due in this window: schedules that skip it lose
         cost += FULL_CHARGE_PENALTY
+        if violations is not None:
+            violations.append("full_charge_missing")
     return cost, traj
 
 
