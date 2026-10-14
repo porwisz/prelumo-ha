@@ -76,7 +76,8 @@ def hour_setting(
             and hour.buy > p.battery_first_above + 1e-9
             and (hour.ev <= 0.05 or hour.ev_battery_allowed)):
         return Setting(HourMode.NORMAL, p.min_soc)  # expensive hour: battery covers the house
-    if hour is not None and keep_value is not None and p is not None and hour.buy >= keep_value:
+    if (hour is not None and keep_value is not None and p is not None and hour.buy >= keep_value
+            and h.soc_end < h.soc_start):  # only where the optimum itself uses the battery
         # grid power now costs more than the stored energy will ever earn: never import while
         # the battery has energy - floor at min SoC, not at the forecast trajectory (a higher
         # real load would otherwise be bought at this price)

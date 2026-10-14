@@ -494,3 +494,23 @@ def test_slots_keep_the_due_full_charge():
     full = [Setting(HourMode.GRID_CHARGE, 100)] * 3 + [Setting(HourMode.NORMAL, 20)] * 3
     assert simulate(hrs, full, 30, p)[0] < simulate(hrs, part, 30, p)[0]
     assert simulate(hrs, part, 30, replace(p, require_full=False))[0] < 1e3
+
+
+def test_cheap_hold_after_grid_charge_survives_slot_building():
+    """Regression (user report): the optimum held the battery at night (grid energy waits for
+    the morning) but the slot floor fell to min SoC, as the window had no later expensive
+    hour - the slot plan then broke the grid-energy rule and was never written."""
+    from dataclasses import replace
+    from core.compress import compress
+    from core.optimizer import HourPlan
+    buy = [0.63] * 3 + [1.5] * 3 + [0.63] * 4
+    hrs = day(buy, [0.5] * 10, load=[0.5] * 10)
+    p = replace(P, min_soc=20, max_soc=98, soc_step=2, max_grid_charge_price=0.63,
+                battery_first_above=0.63)
+    socs = [(30, 60), (60, 90), (90, 90), (90, 87), (87, 84), (84, 81)] + [(81, 81)] * 4
+    plan = [HourPlan(hrs[i].start, a, b, HourMode.GRID_CHARGE if i < 2 else HourMode.NORMAL,
+                     0, 0, 1 if i < 2 else 0, 0, 0) for i, (a, b) in enumerate(socs)]
+    segs, cost = compress(plan, hrs, 30, p, window=10)
+    assert cost < 1e3, segs
+    night = [s for s in segs if s.start >= 6]
+    assert night and all(s.setting.soc >= 78 for s in night), segs
