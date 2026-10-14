@@ -55,8 +55,8 @@ Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo 
 
 - **Maks. ładowanie na co dzień** (domyślnie 98%) — ostatnie procenty ładują się długo, więc
   na co dzień plan i sloty ładowania z sieci kończą na tym poziomie.
-- **Pełne ładowanie co N dni** (domyślnie 7, 0 = wył.) — gdy od ostatnich 100% minęło N dni,
-  Prelumo planuje jedno ładowanie do 100% (balansowanie BMS) najtańszym dozwolonym sposobem
+- **Pełne ładowanie co N dni** (domyślnie 7, 0 = wył.) — gdy termin (N dni od ostatnich 100%)
+  wypada w oknie slotów (domyślnie 18 h), Prelumo planuje jedno ładowanie do 100% (balansowanie BMS) najtańszym dozwolonym sposobem
   (PV, tanie godziny; limit ceny obowiązuje). Monitorowanie: `sensor.prelumo_last_full_charge`
   (data ostatnich 100%, `days_since`, `next_due`, `planned`) i `binary_sensor.prelumo_full_charge_due`.
   Ostatnie 100% Prelumo odczytuje z historii SoC przy starcie i na bieżąco z falownika.

@@ -135,9 +135,14 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
     def full_charge_due(self) -> bool:
         return self.full.due(dt_util.now())
 
+    def full_charge_planned(self) -> bool:
+        """Plan the 100 % charge when it falls due within the slot window - so the cheapest
+        hours around the due time are used, not only the ones after it."""
+        return self.full.due(dt_util.now() + timedelta(hours=int(self.opt[OPT_SLOT_WINDOW])))
+
     def battery_params(self) -> BatteryParams:
         o = self.opt
-        due = self.full_charge_due()
+        due = self.full_charge_planned()
         # everyday limit (last % charge slowly); full charge only when the periodic one is due
         max_soc = int(o[OPT_MAX_SOC]) if due else min(int(o[OPT_MAX_SOC]), int(o[OPT_MAX_CHARGE_SOC]))
         return BatteryParams(
@@ -243,7 +248,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         plan = io.read_current_plan(self.hass, self.inv)
         outage = io.is_outage(self.hass, self.conf.get(CONF_OUTAGE_ENTITY), float(self.conf[CONF_OUTAGE_THRESHOLD]))
         data = PrelumoData(current_plan=plan, outage=outage, soc=io.state_float(self.hass, self.inv.soc))
-        was_due = self.full.due(now)
+        was_due = self.full_charge_planned()
         if self.full.observe(data.soc, now):
             self._save()
             if was_due:  # balancing done -> back to the everyday limit at once
