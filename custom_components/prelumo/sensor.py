@@ -134,6 +134,7 @@ SENSORS: tuple[PrelumoSensorDescription, ...] = (
             "needs": [{"kwh": round(n.energy_kwh, 1), "ready_by": n.ready_by.isoformat() if n.ready_by else None,
                        "source": n.source, "probability": n.probability} for n in c.plan_state.ev.needs],
             "battery_allowed_hours": sum(c.plan_state.ev.battery_allowed),
+            "charging_power_kw": c.ev_power_seen or float(c.opt["ev_charger_kw"]),
             "pattern": c.ev_pattern.to_dict(),
         } if c.plan_state.ev else None,
     ),

@@ -101,6 +101,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.strategy = Strategy.SELF_CONSUMPTION
         self.arbitrage = False
         self.grid_energy: bool | None = None  # battery holds energy bought from the grid
+        self.ev_power_seen: float | None = None  # kW, last measured EV charging power
         self.shadow = True
         self.auto_mode = True
         # learned models
@@ -198,6 +199,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.ledger = ShadowLedger.from_dict(stored.get("shadow"))
         self.last_learn = stored.get("last_learn")
         self.grid_energy = stored.get("grid_energy")
+        self.ev_power_seen = stored.get("ev_power_seen")
         if self.grid_energy is None:  # first run: look it up in the history
             try:
                 self.grid_energy = await io.grid_charged_since_low(
@@ -238,6 +240,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 "writes": [t.isoformat() for t in self.guard.history],
                 "last_full": self.full.last_full.isoformat() if self.full.last_full else None,
                 "grid_energy": self.grid_energy,
+                "ev_power_seen": self.ev_power_seen,
             },
             5,
         )
@@ -446,6 +449,22 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.ledger.record_plan(now.date(), result.slot_plan_cost, result.baseline_cost)
         await self._maybe_write(current, result.plan, now, force_write, result.gain_vs_current)
 
+    def _ev_charger_kw(self) -> float:
+        """Real charging power: the live reading while charging (remembered), else the last one
+        seen, else the option. The car often charges below the charger rating."""
+        live = io.state_float(self.hass, self.conf.get(CONF_EV_POWER))
+        if live is not None:
+            unit = (self.hass.states.get(self.conf[CONF_EV_POWER]).attributes.get("unit_of_measurement") or "kW")
+            kw = live / 1000 if unit == "W" else live
+            if kw > 0.5:
+                if self.ev_power_seen is None or abs(kw - self.ev_power_seen) >= 0.1:
+                    self.ev_power_seen = round(kw, 2)
+                    self._save()
+                return kw
+        if self.ev_power_seen:
+            return self.ev_power_seen
+        return float(self.opt[OPT_EV_CHARGER_KW])
+
     async def _ev_forecast(self, now: datetime, hours: list[datetime], base: list[float]) -> EvForecast:
         c, o = self.conf, self.opt
         limit = io.state_float(self.hass, c.get(CONF_EV_LIMIT))
@@ -455,7 +474,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             limit=limit if limit is not None else float(o[OPT_EV_DEFAULT_TARGET]),
             plugged=bool(plugged_st and plugged_st.state == "on"),
             capacity_kwh=float(o[OPT_EV_CAPACITY]),
-            charger_kw=float(o[OPT_EV_CHARGER_KW]),
+            charger_kw=self._ev_charger_kw(),
         )
         manual = io.read_manual_target(self.hass, c.get(CONF_EV_MANUAL_SOC), c.get(CONF_EV_MANUAL_READY), now)
         cal = await io.read_calendar(self.hass, c.get(CONF_EV_CALENDAR), now, hours[-1] + timedelta(hours=1))

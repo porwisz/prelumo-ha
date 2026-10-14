@@ -30,6 +30,9 @@ raz/dobę  nauka: profil zużycia, model pompy ciepła, wzorzec Tesli, korekta S
 | Tesla | ESP32 BLE: SoC, limit, podłączenie, moc; kalendarz; ręczny cel |
 | Awaria sieci | `sensor.deye_falownik_siec_napiecie_l1` < 180 V |
 
+Moc ładowania Tesli: z czujnika mocy (ESP32) podczas ładowania — zapamiętana na później;
+„moc ładowarki” z opcji służy tylko, dopóki nie było pomiaru.
+
 Priorytet zapotrzebowania Tesli: ręczny cel > kalendarz (start wydarzenia = wyjazd,
 „90%” w tytule = cel) > auto podłączone (SoC → limit) > wyuczony wzorzec.
 Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo jest awaria sieci.
