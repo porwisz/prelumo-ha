@@ -481,3 +481,16 @@ def test_grid_energy_not_used_in_cheap_hours():
     drain = [Setting(HourMode.NORMAL, 20)] * 8
     assert simulate(hrs, drain, 40, p, grid_energy=True)[0] > 5e3
     assert simulate(hrs, drain, 40, p, grid_energy=False)[0] < 1e3
+
+
+def test_slots_keep_the_due_full_charge():
+    """Regression (user report): the hourly optimum charged to 100 % at 13-16 (full charge due),
+    but the 6 slots cut it to 44 % - the slot simulator did not know about the requirement."""
+    from dataclasses import replace
+    from core.compress import Setting, simulate
+    hrs = day([0.63] * 3 + [1.5] * 3, [0.5] * 6, load=[0.5] * 6)
+    p = replace(P, min_soc=20, max_soc=100, require_full=True, max_charge_kw=10)
+    part = [Setting(HourMode.GRID_CHARGE, 44)] * 3 + [Setting(HourMode.NORMAL, 20)] * 3
+    full = [Setting(HourMode.GRID_CHARGE, 100)] * 3 + [Setting(HourMode.NORMAL, 20)] * 3
+    assert simulate(hrs, full, 30, p)[0] < simulate(hrs, part, 30, p)[0]
+    assert simulate(hrs, part, 30, replace(p, require_full=False))[0] < 1e3

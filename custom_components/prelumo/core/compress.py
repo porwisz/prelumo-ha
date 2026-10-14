@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime
 
-from .optimizer import BatteryParams, HourInput, HourMode, HourPlan, expensive_reserve
+from .optimizer import FULL_CHARGE_PENALTY, BatteryParams, HourInput, HourMode, HourPlan, expensive_reserve
 from .plan import MAX_POWER_W, SLOT_COUNT, DayPlan, Slot, SlotMode
 
 CAP_PENALTY = 1e4  # PLN; makes a merge that grid-charges above the price cap unacceptable
@@ -213,6 +213,9 @@ def simulate(
             })
     tp = min((h.buy for h in hours), default=0.0) * eta
     cost -= (soc - p.min_soc / 100 * cap) * tp
+    if p.require_full and hours and max(traj, default=0.0) < p.max_soc - 1:
+        # the periodic 100 % charge is due in this window: schedules that skip it lose
+        cost += FULL_CHARGE_PENALTY
     return cost, traj
 
 
