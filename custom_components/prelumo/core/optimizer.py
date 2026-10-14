@@ -125,6 +125,12 @@ class _Step:
     battery_export: float
 
 
+def hold_cost(soc: float, p: BatteryParams) -> float:
+    """Objective-only cost (PLN) of keeping the battery at ``soc`` % for one hour."""
+    return (p.capacity_kwh / 100) * (
+        HOLD_COST * max(0.0, soc - p.min_soc) + HIGH_SOC_HOLD_COST * max(0.0, soc - HIGH_SOC))
+
+
 def expensive_reserve(hours: list[HourInput], p: BatteryParams) -> list[float]:
     """Battery-side kWh to keep while selling in each hour for the house in the expensive hours.
 
@@ -257,7 +263,7 @@ def optimize(
         return -(s - lo) / 100 * p.capacity_kwh * terminal_price
 
     def hold(s: int) -> float:
-        return (p.capacity_kwh / 100) * (HOLD_COST * (s - lo) + HIGH_SOC_HOLD_COST * max(0, s - HIGH_SOC))
+        return hold_cost(s, p)
 
     T = len(hours)
     reserve = expensive_reserve(hours, p)

@@ -544,3 +544,18 @@ def test_due_full_charge_reached_just_before_the_sale():
     r = optimize(day(buy, sell), 30, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
     full = [i for i, h in enumerate(r.hours) if h.soc_end >= 100]
     assert full and min(full) == 9  # 100 % in the last hour before the sale, not overnight
+
+
+def test_slots_hold_overnight_and_charge_late():
+    # battery already at 80 %, full charge due before the 07-08 sale: hold overnight, top up at 06
+    buy = [1.4] + [0.6] * 10 + [0.9] * 7
+    sell = [0.3] * 11 + [1.35] * 2 + [0.7] * 5
+    hrs = day(buy, sell, load=[0.4] * 18)
+    p = BatteryParams(**{**P.__dict__, "min_soc": 20, "soc_step": 2, "max_grid_charge_price": 0.65,
+                         "battery_first_above": 0.7, "require_full": True})
+    r = optimize(hrs, 80, p, Strategy.MAX_GRID_TRADING, arbitrage=True, grid_energy=True, full_by=18)
+    segs, cost = compress(r.hours, hrs, 80, p, window=18, grid_energy=True)
+    plan = to_day_plan(segs, hrs, p, soc_now=80)
+    charge = [s for s in plan.slots if s.mode is SlotMode.GRID_CHARGE]
+    assert charge and min(s.start for s in charge) >= 500
+    assert cost < 100  # no hard-rule / full-charge penalty

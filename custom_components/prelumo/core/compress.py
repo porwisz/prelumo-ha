@@ -12,7 +12,9 @@ import math
 from dataclasses import dataclass
 from datetime import datetime
 
-from .optimizer import FULL_CHARGE_PENALTY, BatteryParams, HourInput, HourMode, HourPlan, expensive_reserve
+from .optimizer import (
+    FULL_CHARGE_PENALTY, BatteryParams, HourInput, HourMode, HourPlan, expensive_reserve, hold_cost,
+)
 from .plan import MAX_POWER_W, SLOT_COUNT, DayPlan, Slot, SlotMode
 
 CAP_PENALTY = 1e4  # PLN; makes a merge that grid-charges above the price cap unacceptable
@@ -188,9 +190,9 @@ def simulate(
             sold_since_cheap += max(0.0, min(-bus, -g))  # the part of the discharge that was exported
         cheap = p.max_grid_charge_price is not None and h.buy <= p.max_grid_charge_price + 1e-9
         to_house = min(-bus, max(0.0, net)) if bus < 0 else 0.0
-        if grid_energy and cheap and to_house > 0.1:
+        if grid_energy and cheap and to_house > max(1, p.soc_step) / 100 * cap * eta + 0.1:
             # hard rule: grid energy in the battery waits for the expensive hours (no cycle to
-            # save the cheap price)
+            # save the cheap price); below one SoC step it is rounding, as in the optimiser
             cost += CAP_PENALTY
         if st.mode is HourMode.GRID_CHARGE and bus > 0:
             grid_energy = True
@@ -272,7 +274,10 @@ def compress(
             segs.append(Segment(i, 1, st))
 
     def cost_of(ss: list[Segment]) -> float:
-        return simulate(hours, _expand(ss), soc_now, params, grid_energy=grid_energy)[0]
+        # + the optimiser's holding cost: of two equally cheap schedules, the one that charges
+        # later (just before the energy is needed) wins
+        cost, traj = simulate(hours, _expand(ss), soc_now, params, grid_energy=grid_energy)
+        return cost + sum(hold_cost(s, params) for s in traj)
 
     current = cost_of(segs)
     while len(segs) > slots:
@@ -347,7 +352,7 @@ def compress(
             break
         half = s.length // 2
         segs[i : i + 1] = [Segment(s.start, half, s.setting), Segment(s.start + half, s.length - half, s.setting)]
-    return segs, current
+    return segs, simulate(hours, _expand(segs), soc_now, params, grid_energy=grid_energy)[0]
 
 
 def to_day_plan(
