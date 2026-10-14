@@ -98,8 +98,9 @@ def run_planner(
 ) -> PlannerResult:
     hours = horizon_hours(inp.now, inp.horizon_h)
     hin, missing = build_hours(inp, hours)
-    opt = optimize(hin, inp.soc, params, strategy, arbitrage, grid_energy=inp.grid_energy)
     window = max(6, min(inp.window_h, 24, len(hin)))
+    opt = optimize(hin, inp.soc, params, strategy, arbitrage, grid_energy=inp.grid_energy,
+                   full_by=window)
     segs, _ = compress(opt.hours, hin, inp.soc, params, window=window, grid_energy=inp.grid_energy)
     plan = to_day_plan(segs, hin, params, current, soc_now=inp.soc)
     day = hin[:window]

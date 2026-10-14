@@ -233,6 +233,7 @@ def optimize(
     arbitrage: bool = False,
     terminal_price: float | None = None,
     grid_energy: bool = False,
+    full_by: int | None = None,
 ) -> OptimizeResult:
     if not hours:
         return OptimizeResult([], 0.0, 0.0, strategy, arbitrage)
@@ -286,7 +287,9 @@ def optimize(
                         nt = tainted or st.grid_charge > EPS
                         if s1 <= lo:
                             nt = False
-                        nf = full or done(s1)
+                        # a due full charge counts only within the slot window (``full_by`` hours) -
+                        # the 6 slots must contain it, a 100 % later in the horizon is not written
+                        nf = full or (done(s1) and (full_by is None or t < full_by))
                         # hurdle (objective only): selling grid-charged energy must earn the margin
                         hurdle = p.arbitrage_min_margin * st.battery_export if tainted else 0.0
                         v = st.cost + hurdle + V[t + 1][(s1, nt, nf)]

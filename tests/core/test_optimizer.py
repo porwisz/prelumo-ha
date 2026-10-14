@@ -514,3 +514,14 @@ def test_cheap_hold_after_grid_charge_survives_slot_building():
     assert cost < 1e3, segs
     night = [s for s in segs if s.start >= 6]
     assert night and all(s.setting.soc >= 78 for s in night), segs
+
+
+def test_full_charge_must_fall_within_the_slot_window():
+    """Regression (user report): the optimum put the due 100 % at night (beyond the 18 h slot
+    window); the slots could not contain it and the plan was rejected with a penalty."""
+    from dataclasses import replace
+    buy = [0.63] * 2 + [1.5] * 4 + [0.63] * 6
+    hrs = day(buy, [0.6] * 12, load=[0.5] * 12)
+    p = replace(P, min_soc=20, max_soc=100, require_full=True, soc_step=2, max_grid_charge_price=0.63)
+    r = optimize(hrs, 80, p, Strategy.SELF_CONSUMPTION, full_by=6)
+    assert max(h.soc_end for h in r.hours[:6]) == 100
