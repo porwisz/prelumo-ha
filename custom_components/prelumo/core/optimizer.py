@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from functools import lru_cache
 
 EPS = 0.05  # kWh
 INFEASIBLE = 1e6
@@ -62,6 +63,9 @@ class BatteryParams:
     reserve_margin: float = 0.3
     # With arbitrage on: grid-charged energy is sold only if it earns at least this per kWh
     arbitrage_min_margin: float = 0.0
+    # BMS charge taper: (from SoC %, max battery-side kW) - the last % charge slowly (measured
+    # on the Deye: 99 -> 100 % takes ~30 min)
+    charge_taper: tuple[tuple[int, float], ...] = ((90, 5.5), (95, 3.0), (98, 1.5), (99, 0.5))
 
     @property
     def eta(self) -> float:
@@ -125,6 +129,36 @@ class _Step:
     battery_export: float
 
 
+def charge_kw_at(soc: float, p: BatteryParams) -> float:
+    """Max battery-side charge power (kW) at ``soc`` %."""
+    kw = p.max_charge_kw * p.eta
+    for start, lim in p.charge_taper:
+        if soc >= start - 1e-9:
+            kw = min(kw, lim)
+    return kw
+
+
+@lru_cache(maxsize=4096)
+def max_charge_kwh(soc: float, p: BatteryParams, hours: float = 1.0) -> float:
+    """Battery-side kWh that fit into ``hours`` starting at ``soc`` %, along the taper."""
+    pct_kwh = p.capacity_kwh / 100
+    edges = sorted({float(a) for a, _ in p.charge_taper if a > soc} | {float(p.max_soc)})
+    out, t, cur = 0.0, hours, soc
+    for edge in edges:
+        if cur >= p.max_soc - 1e-9 or t <= 1e-9:
+            break
+        kw = charge_kw_at(cur, p)
+        need = (min(edge, p.max_soc) - cur) * pct_kwh
+        if kw <= 0:
+            break
+        if need / kw >= t:
+            return out + kw * t
+        out += need
+        t -= need / kw
+        cur = min(edge, p.max_soc)
+    return out
+
+
 def hold_cost(soc: float, p: BatteryParams) -> float:
     """Objective-only cost (PLN) of keeping the battery at ``soc`` % for one hour."""
     return (p.capacity_kwh / 100) * (
@@ -161,6 +195,9 @@ def _transition(
     if delta > 0:
         bus = delta / p.eta
         if bus > p.max_charge_kw + 1e-9:
+            return None
+        # BMS taper: a step of the SoC grid may round up by up to half a step
+        if delta > max_charge_kwh(s0, p) + 0.5 * max(1, p.soc_step) / 100 * p.capacity_kwh + 1e-9:
             return None
     else:
         bus = delta * p.eta  # negative = delivered to the house bus
@@ -346,7 +383,8 @@ def simulate_baseline(hours: list[HourInput], soc_now: float, params: BatteryPar
     for h in hours:
         net = h.load + h.ev - h.pv
         if net < 0:
-            charge = min(-net * p.eta, hi_kwh - soc_kwh, p.max_charge_kw)
+            charge = min(-net * p.eta, hi_kwh - soc_kwh, p.max_charge_kw,
+                         max_charge_kwh(soc_kwh / p.capacity_kwh * 100, p))
             soc_kwh += charge
             exp = min(p.grid_export_kw, -net - charge / p.eta)
             cost -= exp * h.sell if h.sell > 0 else 0.0

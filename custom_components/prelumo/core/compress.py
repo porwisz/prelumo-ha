@@ -14,6 +14,7 @@ from datetime import datetime
 
 from .optimizer import (
     FULL_CHARGE_PENALTY, BatteryParams, HourInput, HourMode, HourPlan, expensive_reserve, hold_cost,
+    max_charge_kwh,
 )
 from .plan import MAX_POWER_W, SLOT_COUNT, DayPlan, Slot, SlotMode
 
@@ -154,7 +155,7 @@ def simulate(
             # the inverter would charge from the grid at this price (and the house runs on grid)
             cost += CAP_PENALTY
         if st.mode is HourMode.GRID_CHARGE and soc < target:
-            e = min(target - soc, p.max_charge_kw * eta)
+            e = min(target - soc, p.max_charge_kw * eta, max_charge_kwh(soc / cap * 100, p))
             bus = e / eta
         elif st.mode is HourMode.SELL and soc > lo:
             # the battery output covers the house and exports at most the inverter's sell limit
@@ -162,7 +163,7 @@ def simulate(
             e = min(soc - lo, out_kw / eta, p.max_discharge_kw)
             bus = -e * eta
         elif net < 0 and soc < hi:
-            e = min(-net * eta, hi - soc, p.max_charge_kw * eta)
+            e = min(-net * eta, hi - soc, p.max_charge_kw * eta, max_charge_kwh(soc / cap * 100, p))
             bus = e / eta
         elif net > 0 and soc > lo:
             e = min(net / eta, soc - lo, p.max_discharge_kw)

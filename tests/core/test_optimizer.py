@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from core.compress import compress, simulate, to_day_plan
 from core.diff import WriteGuard, WritePolicy, material_changes
 from core.optimizer import (
-    BatteryParams, HourInput, HourMode, Strategy, optimize, simulate_baseline,
+    BatteryParams, HourInput, HourMode, Strategy, max_charge_kwh, optimize, simulate_baseline,
 )
 from core.plan import SlotMode
 from core.planner import parse_fallback_plan
@@ -559,3 +559,21 @@ def test_slots_hold_overnight_and_charge_late():
     charge = [s for s in plan.slots if s.mode is SlotMode.GRID_CHARGE]
     assert charge and min(s.start for s in charge) >= 500
     assert cost < 100  # no hard-rule / full-charge penalty
+
+
+def test_charge_taper_matches_the_measured_bms_curve():
+    p = BatteryParams(capacity_kwh=26.25, max_charge_kw=8)
+    pct = p.capacity_kwh / 100
+    assert 18 < max_charge_kwh(80, p) / pct < 20  # 80 -> 100 % does not fit in one hour
+    assert 0.9 < max_charge_kwh(99, p) / pct <= 1.0  # the last % takes ~30 min
+    assert abs(max_charge_kwh(99, p, hours=0.5) / pct - 0.95) < 0.05
+
+
+def test_full_charge_starts_early_enough_for_the_taper():
+    buy = [0.6] * 8 + [1.0] * 2
+    sell = [0.3] * 8 + [2.0] * 2
+    p = BatteryParams(**{**P.__dict__, "capacity_kwh": 26.25, "max_charge_kw": 8, "soc_step": 2,
+                         "require_full": True})
+    r = optimize(day(buy, sell), 80, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert r.hours[7].soc_end == 100
+    assert r.hours[6].soc_end < 100 and r.hours[6].mode is HourMode.GRID_CHARGE  # starts an hour earlier
