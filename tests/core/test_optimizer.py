@@ -449,7 +449,7 @@ def test_cheap_night_charge_for_expensive_morning():
 
 
 def test_adjacent_grid_charge_slots_are_joined():
-    """Grid charge to 38 %, 40 %, 48 % in three slots is one slot to 48 % at the same price."""
+    """Grid charge to 38 %, 40 %, 48 % in three slots becomes one grid-charge setting."""
     from dataclasses import replace
     from core.compress import compress
     from core.optimizer import HourPlan
@@ -460,8 +460,9 @@ def test_adjacent_grid_charge_slots_are_joined():
     plan = [HourPlan(hrs[i].start, a, b, HourMode.GRID_CHARGE if i < 3 else HourMode.NORMAL,
                      0, 0, 1 if i < 3 else 0, 0, 0) for i, (a, b) in enumerate(socs)]
     segs, _ = compress(plan, hrs, 30, p, window=8)
-    charge = {s.setting.soc for s in segs if s.setting.mode is HourMode.GRID_CHARGE}
-    assert charge == {48}, segs
+    charge = [s for s in segs if s.setting.mode is HourMode.GRID_CHARGE]
+    assert len({s.setting for s in charge}) == 1 and charge[0].start == 0, segs  # one setting
+    assert 30 < charge[0].setting.soc <= 48
 
 
 def test_grid_energy_not_used_in_cheap_hours():

@@ -62,6 +62,22 @@ class WriteGuard:
             return False, "min_interval"
         return True, None
 
+    def status(self, now: datetime) -> dict:
+        """Writes today and the earliest time the next automatic write is allowed."""
+        today = sorted(t for t in self.history if t.astimezone(now.tzinfo).date() == now.date())
+        nxt = now
+        if len(today) >= self.policy.max_writes_per_day:
+            nxt = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), now.tzinfo)
+        elif self.history and now - max(self.history) < self.policy.min_interval:
+            nxt = max(self.history) + self.policy.min_interval
+        return {
+            "writes_today": [t.isoformat() for t in today],
+            "max_writes_per_day": self.policy.max_writes_per_day,
+            "min_interval_min": int(self.policy.min_interval.total_seconds() // 60),
+            "min_gain": self.policy.min_gain,
+            "next_write_allowed": nxt.isoformat(),
+        }
+
     def record(self, now: datetime) -> None:
         self.history.append(now)
 

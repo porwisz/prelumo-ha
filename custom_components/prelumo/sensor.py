@@ -75,6 +75,7 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "gain_vs_current": round(r.gain_vs_current, 2) if r and r.gain_vs_current is not None else None,
         "notes": r.notes if r else None,
         "write_decision": ps.write_decision,
+        **c.guard.status(dt_util.now()),
         "last_write": ps.last_write.isoformat() if ps.last_write else None,
         "stale_sources": ps.stale_sources,
         "error": ps.error,

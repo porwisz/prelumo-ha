@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
+PENALTY_LEVEL = 1e3  # PLN: a plan cost this large carries a hard-rule penalty (CAP_PENALTY)
+
 
 def energy_cost(
     imports: dict[datetime, float], exports: dict[datetime, float],
@@ -22,6 +24,8 @@ class ShadowLedger:
     days: dict[str, dict[str, float]] = field(default_factory=dict)
 
     def record_plan(self, day: date, plan_cost: float, baseline_cost: float) -> None:
+        if abs(plan_cost) >= PENALTY_LEVEL or abs(baseline_cost) >= PENALTY_LEVEL:
+            return  # a hard-rule penalty, not money: keep the last real figure for the day
         d = self.days.setdefault(day.isoformat(), {})
         d["plan_cost"] = round(plan_cost, 3)
         d["baseline_cost"] = round(baseline_cost, 3)
@@ -42,4 +46,9 @@ class ShadowLedger:
 
     @classmethod
     def from_dict(cls, data: dict | None) -> ShadowLedger:
-        return cls(dict((data or {}).get("days", {})))
+        days = dict((data or {}).get("days", {}))
+        for d in days.values():  # drop penalty figures recorded by older versions
+            if any(abs(d.get(k, 0.0)) >= PENALTY_LEVEL for k in ("plan_cost", "baseline_cost")):
+                for k in ("plan_cost", "baseline_cost", "expected_savings"):
+                    d.pop(k, None)
+        return cls(days)

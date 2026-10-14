@@ -240,7 +240,8 @@ def _candidates(a: Setting, b: Setting) -> list[Setting]:
     c = {a, b}
     if a.mode == b.mode:
         c |= {Setting(a.mode, min(a.soc, b.soc)), Setting(a.mode, max(a.soc, b.soc))}
-    return list(c)
+    # deterministic order (a set of enums iterates in hash order, which changes between runs)
+    return sorted(c, key=lambda st: (st.mode.value, st.soc, st.power_kw or 0.0))
 
 
 TIDY_TOLERANCE = 0.05  # PLN: a simpler schedule is worth this much
@@ -301,15 +302,16 @@ def compress(
             a, b = segs[i], segs[i + 1]
             if a.setting.mode is not b.setting.mode:
                 continue
+            best = None
             for cand in _candidates(a.setting, b.setting):
                 if cand.mode is not a.setting.mode:
                     continue
                 trial = segs[:i] + [Segment(a.start, a.length + b.length, cand)] + segs[i + 2 :]
                 c = cost_of(trial)
-                if c <= current + TIDY_TOLERANCE:
-                    segs, current, merged = trial, c, True
-                    break
-            if merged:
+                if best is None or c < best[0] - 1e-9:
+                    best = (c, trial)
+            if best is not None and best[0] <= current + TIDY_TOLERANCE:
+                current, segs, merged = best[0], best[1], True
                 break
     # Free slots: cut the idle tail off sell slots (e.g. sell 20:00, then the battery is at the
     # floor all night - the night part becomes a normal slot instead of Export First).

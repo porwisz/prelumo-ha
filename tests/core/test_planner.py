@@ -79,3 +79,15 @@ def test_violation_sell_below_expensive_reserve():
         return DayPlan(tuple(s))
     assert "sell_below_expensive_reserve" in plan_violations(plan(20), hrs, p, Strategy.MAX_GRID_TRADING)
     assert "sell_below_expensive_reserve" not in plan_violations(plan(50), hrs, p, Strategy.MAX_GRID_TRADING)
+
+
+def test_shadow_ledger_ignores_penalty_costs():
+    from datetime import date
+    from core.shadow import ShadowLedger
+    led = ShadowLedger()
+    led.record_plan(date(2026, 10, 13), 5.0, 10.0)
+    led.record_plan(date(2026, 10, 13), 80009.9, 10.9)  # penalised replan: not money
+    assert led.total_expected_savings() == 5.0
+    old = ShadowLedger.from_dict({"days": {"2026-10-13": {"plan_cost": 80009.9, "baseline_cost": 10.9,
+                                                          "expected_savings": -79999.0, "actual_cost": -10.5}}})
+    assert old.total_expected_savings() == 0.0 and old.days["2026-10-13"] == {"actual_cost": -10.5}
