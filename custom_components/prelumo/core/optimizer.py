@@ -20,6 +20,12 @@ from enum import StrEnum
 EPS = 0.05  # kWh
 INFEASIBLE = 1e6
 FULL_CHARGE_PENALTY = 1e3  # PLN; a due full charge is done whenever it is possible at all
+# Objective only (not in reported costs): stored energy "costs" a little per hour, more above
+# HIGH_SOC. Among equally cheap hours the battery is charged as late as possible - just before
+# the expensive / sell hours - instead of filling up at once and sitting full all night.
+HOLD_COST = 0.002  # PLN per kWh above min SoC per hour
+HIGH_SOC = 90  # %
+HIGH_SOC_HOLD_COST = 0.01  # PLN per kWh above HIGH_SOC per hour
 
 
 class Strategy(StrEnum):
@@ -250,6 +256,9 @@ def optimize(
     def term(s: int) -> float:
         return -(s - lo) / 100 * p.capacity_kwh * terminal_price
 
+    def hold(s: int) -> float:
+        return (p.capacity_kwh / 100) * (HOLD_COST * (s - lo) + HIGH_SOC_HOLD_COST * max(0, s - HIGH_SOC))
+
     T = len(hours)
     reserve = expensive_reserve(hours, p)
     # State = (soc, holds grid energy, has reached full). The "full" flag is only tracked when a
@@ -292,7 +301,7 @@ def optimize(
                         nf = full or (done(s1) and (full_by is None or t < full_by))
                         # hurdle (objective only): selling grid-charged energy must earn the margin
                         hurdle = p.arbitrage_min_margin * st.battery_export if tainted else 0.0
-                        v = st.cost + hurdle + V[t + 1][(s1, nt, nf)]
+                        v = st.cost + hurdle + hold(s1) + V[t + 1][(s1, nt, nf)]
                         if best is None or v < best[0]:
                             best = (v, s1, nt, nf, st)
                     if best is None:  # should not happen: idle is always allowed unless limits

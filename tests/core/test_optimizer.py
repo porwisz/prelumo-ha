@@ -525,3 +525,22 @@ def test_full_charge_must_fall_within_the_slot_window():
     p = replace(P, min_soc=20, max_soc=100, require_full=True, soc_step=2, max_grid_charge_price=0.63)
     r = optimize(hrs, 80, p, Strategy.SELF_CONSUMPTION, full_by=6)
     assert max(h.soc_end for h in r.hours[:6]) == 100
+
+
+def test_charge_just_before_the_expensive_hours():
+    # flat cheap night, expensive morning: charge in the last cheap hours, not at once
+    buy = [0.6] * 8 + [1.4] * 6
+    hrs = day(buy, [0.3] * 14, load=[0.3] * 8 + [2] * 6)
+    r = optimize(hrs, 10, P, Strategy.SELF_CONSUMPTION)
+    charged = [i for i, h in enumerate(r.hours) if h.mode is HourMode.GRID_CHARGE]
+    assert charged and min(charged) >= 6
+    assert r.hours[7].soc_end > 50
+
+
+def test_due_full_charge_reached_just_before_the_sale():
+    buy = [0.6] * 10 + [1.0] * 2
+    sell = [0.3] * 10 + [2.0] * 2
+    p = BatteryParams(**{**P.__dict__, "require_full": True})
+    r = optimize(day(buy, sell), 30, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
+    full = [i for i, h in enumerate(r.hours) if h.soc_end >= 100]
+    assert full and min(full) == 9  # 100 % in the last hour before the sale, not overnight
