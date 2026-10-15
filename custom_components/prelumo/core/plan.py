@@ -195,3 +195,8 @@ def parse_flags(value: str | int) -> int:
 
 def parse_mode(value: str) -> SlotMode:
     return SlotMode(value)
+
+
+def same_behaviour(a: DayPlan, b: DayPlan) -> bool:
+    """Same slot starts, SoC targets and modes (power and unmanaged flags aside)."""
+    return [(x.start, x.soc, x.mode) for x in a.slots] == [(x.start, x.soc, x.mode) for x in b.slots]

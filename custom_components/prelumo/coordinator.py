@@ -38,7 +38,7 @@ from .core.forecast.heatpump import HeatPumpModel
 from .core.forecast.load import LoadProfile, base_load_samples
 from .core.forecast.pv import PvBias
 from .core.optimizer import BatteryParams, Strategy
-from .core.plan import DayPlan
+from .core.plan import DayPlan, same_behaviour
 from .core.planner import PlannerInputs, PlannerResult, horizon_hours, parse_fallback_plan, run_planner
 from .core.shadow import ShadowLedger, energy_cost
 from .core.tariff import G13Tariff
@@ -46,6 +46,8 @@ from .ha_io import inputs as io
 from .ha_io.inverter import InverterWriter
 
 _LOGGER = logging.getLogger(__name__)
+
+WRITE_SETTLE = timedelta(minutes=5)  # max time the work mode follows the written plan
 
 
 @dataclass
@@ -92,6 +94,11 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         c = {**DEFAULTS, **entry.data}
         self.conf = c
         self.inv = io.InverterEntities(c[CONF_INVERTER_PREFIX])
+        # plan just written: the inverter is read back slot by slot, so for a while the read-back
+        # mixes old and new slots (15 Oct: new start times with an old sell flag -> Export First
+        # for 20 s and 4 kW to the grid). Work mode follows the written plan until they match.
+        self._written: DayPlan | None = None
+        self._written_at: datetime | None = None
         self.writer = InverterWriter(
             hass, c[CONF_WRITE_ACTION], c[CONF_MODE_SELECT], c[CONF_MODE_EXPORT_FIRST], c[CONF_MODE_ZERO_EXPORT]
         )
@@ -265,7 +272,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             data.active_index = plan.active_index(now)
             data.next_change, _ = plan.next_change(now)
             data.sell_now = plan.slots[data.active_index].mode.value == "sell"
-            data.desired_mode = self.writer.desired_mode(plan, now)
+            data.desired_mode = self.writer.desired_mode(self._mode_plan(plan, now), now)
             if outage:
                 data.mode_action = "outage"
             elif not self.auto_mode:
@@ -280,6 +287,19 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                     data.mode_action = "error"
                     _LOGGER.warning("Work mode change failed: %s", err)
         return data
+
+    def _mode_plan(self, read: DayPlan, now: datetime) -> DayPlan:
+        """The plan the work mode follows: the written one until the read-back matches it."""
+        w = self._written
+        if w is None or self._written_at is None:
+            return read
+        if same_behaviour(read, w) or now - self._written_at > WRITE_SETTLE:
+            self._written = self._written_at = None
+            return read
+        return w
+
+    def _wrote(self, plan: DayPlan, now: datetime) -> None:
+        self._written, self._written_at = plan, now
 
     @callback
     def _track_grid_energy(self, plan: DayPlan | None, now: datetime, soc: float | None) -> None:
@@ -514,6 +534,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             return
         ir.async_delete_issue(self.hass, DOMAIN, ISSUE_WRITE_FAILED)
         self.guard.record(now)
+        self._wrote(new, now)
         ps.last_write = now
 
     def _raise_stale(self, stale: list[str]) -> None:
@@ -535,6 +556,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         await self.writer.write_plan(merged)
         now = dt_util.now()
         self.guard.record(now)
+        self._wrote(merged, now)
         self.plan_state.last_write = now
         self._save()
         await self.async_request_refresh()

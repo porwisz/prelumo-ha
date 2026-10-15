@@ -605,3 +605,12 @@ def test_sell_slot_power_never_below_the_house_peak():
     powers: dict[int, float] = {}
     simulate(hrs, [Setting(HourMode.SELL, 60)] * 2 + [Setting(HourMode.NORMAL, 20)], 98, p, powers=powers)
     assert powers[0] >= 6.0
+
+
+def test_same_behaviour_ignores_power_and_spots_a_stale_flag():
+    from core.plan import same_behaviour
+    a = parse_fallback_plan("10:00 20; 13:00 100 grid_charge; 16:00 20; 18:00 46 sell; 20:00 24 sell; 21:00 24")
+    b = parse_fallback_plan("10:00 20; 13:00 100 grid_charge; 16:00 20; 18:00 46 sell; 20:00 24 sell; 21:00 24", 6000)
+    mixed = parse_fallback_plan("10:00 20 sell; 13:00 100 grid_charge; 16:00 20; 18:00 46 sell; 20:00 24 sell; 21:00 24")
+    assert same_behaviour(a, b)
+    assert not same_behaviour(a, mixed)
