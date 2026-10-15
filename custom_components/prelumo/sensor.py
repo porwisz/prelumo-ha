@@ -61,6 +61,7 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "min_sell_soc": int(c.opt["min_sell_soc"]),
         "battery_first_in_expensive_hours": bool(c.opt["battery_first_in_expensive_hours"]),
         "reserve_margin": int(c.opt["reserve_margin"]),
+        "pv_trust": int(c.opt.get("pv_trust", 50)),
         "arbitrage_min_margin": float(c.opt.get("arbitrage_min_margin", 0.5)),
         "grid_energy_in_battery": c.grid_energy,
         "shadow_mode": c.shadow,

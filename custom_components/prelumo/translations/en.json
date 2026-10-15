@@ -115,6 +115,8 @@
           "max_charge_soc": "Everyday max charge",
           "full_charge_days": "Full charge every (days)",
           "battery_first_in_expensive_hours": "Battery first in expensive hours",
+          "pv_trust": "PV forecast trusted for the reserve",
+          "pv_trust": "Before expensive hours the battery holds what the house needs there if PV gave only this share of the forecast (100 % = trust the forecast).",
           "reserve_margin": "Reserve margin for expensive hours",
           "arbitrage_min_margin": "Min. arbitrage profit",
           "slot_window_hours": "Schedule window"

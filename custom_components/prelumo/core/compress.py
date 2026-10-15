@@ -14,7 +14,7 @@ from datetime import datetime
 
 from .optimizer import (
     FULL_CHARGE_PENALTY, BatteryParams, HourInput, HourMode, HourPlan, expensive_reserve, hold_cost,
-    max_charge_kwh,
+    max_charge_kwh, pv_risk, risk_cost,
 )
 from .plan import MAX_POWER_W, SLOT_COUNT, DayPlan, Slot, SlotMode
 
@@ -95,6 +95,7 @@ def simulate(
     powers: dict[int, float] | None = None,
     grid_energy: bool = False,
     violations: list[str] | None = None,
+    risk: bool = False,
 ) -> tuple[float, list[float]]:
     """Inverter behaviour per hour; returns (cost, soc trajectory %).
 
@@ -116,6 +117,7 @@ def simulate(
     traj = []
     sold_since_cheap = 0.0  # battery energy exported since the last cheap hour
     reserve = expensive_reserve(hours, p)
+    risks = pv_risk(hours, p) if risk else []
     run_kw = sell_kw
     for i, (h, st) in enumerate(zip(hours, settings)):
         def broke(rule: str, _h: HourInput = h) -> float:
@@ -217,6 +219,8 @@ def simulate(
         hour_cost = imp * h.buy - (exp * h.sell if h.sell > 0 else 0.0) + wear
         cost += hour_cost
         traj.append(soc / cap * 100)
+        if risk:  # objective only (slot merging): reserve for a cloudy expensive run
+            cost += risk_cost(risks[i + 1], soc - p.min_soc / 100 * cap)
         if detail is not None:
             detail.append({
                 "start": h.start.isoformat(), "mode": st.mode.value, "floor": st.soc,
@@ -289,7 +293,7 @@ def compress(
     def cost_of(ss: list[Segment]) -> float:
         # + the optimiser's holding cost: of two equally cheap schedules, the one that charges
         # later (just before the energy is needed) wins
-        cost, traj = simulate(hours, _expand(ss), soc_now, params, grid_energy=grid_energy)
+        cost, traj = simulate(hours, _expand(ss), soc_now, params, grid_energy=grid_energy, risk=True)
         return cost + sum(hold_cost(s, params) for s in traj)
 
     current = cost_of(segs)

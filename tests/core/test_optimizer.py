@@ -622,3 +622,18 @@ def test_slot_costs_sum_the_hours_of_each_slot():
     hrs = day([0.6] * 5, [0.3] * 5)
     detail = [{"cost": c} for c in (1.0, 2.0, 3.0, 4.0, -1.5)]
     assert slot_costs(plan, hrs, detail) == [3.0, 7.0, -1.5, None, None, None]
+
+
+def test_pv_trust_charges_overnight_for_a_morning_the_forecast_says_is_sunny():
+    # cheap night, expensive morning; the forecast PV covers the house - with 50 % trust the
+    # battery is charged at night for the morning instead of relying on the sun
+    buy = [0.63] * 6 + [0.9] * 6
+    sell = [0.3] * 12
+    load = [0.4] * 6 + [1.5] * 6
+    pv = [0] * 6 + [0.5, 1.5, 2.0, 2.0, 2.0, 1.5]
+    hrs = day(buy, sell, pv=pv, load=load)
+    base = dict(P.__dict__, min_soc=20, battery_first_above=0.63, max_grid_charge_price=0.63, soc_step=2)
+    trust = optimize(hrs, 22, BatteryParams(**{**base, "pv_trust": 0.5}), Strategy.SELF_CONSUMPTION)
+    full = optimize(hrs, 22, BatteryParams(**{**base, "pv_trust": 1.0}), Strategy.SELF_CONSUMPTION)
+    assert trust.hours[5].soc_end > full.hours[5].soc_end + 10  # charged before 06:00
+    assert any(h.mode is HourMode.GRID_CHARGE for h in trust.hours[:6])

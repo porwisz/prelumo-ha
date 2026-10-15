@@ -57,6 +57,10 @@ class BatteryParams:
     # kW; a Deye sell slot (Export First) caps ALL battery output - the house too - at the slot
     # power, so a sell slot never gets less (a kettle + oven above it would run on the grid)
     sell_min_power_kw: float = 6.0
+    # Share of the PV forecast trusted for the house reserve in expensive hours (1.0 = off): before
+    # an expensive run the battery should hold what the house needs there if PV gave only this
+    # share; the reserve kept while selling is counted the same way.
+    pv_trust: float = 1.0
     require_full: bool = False  # periodic 100% charge due: plan must reach max_soc once
     # Above this buy price the battery covers the house first: no buying for the house while the
     # battery is above min SoC (no "buy expensive to sell later"). None = off.
@@ -182,12 +186,42 @@ def expensive_reserve(hours: list[HourInput], p: BatteryParams) -> list[float]:
     for t in range(len(hours) - 1, -1, -1):
         h = hours[t]
         if h.buy > p.battery_first_above + 1e-9:
-            acc += max(0.0, h.load - h.pv)  # house + heat pump, without the EV
+            acc += max(0.0, h.load - h.pv * p.pv_trust)  # house + heat pump, without the EV
             out[t] = acc * (1 + p.reserve_margin) / p.eta
         else:
             out[t] = acc * (1 + p.reserve_margin) / p.eta
             acc = 0.0  # a cheap hour ends the expensive run
     return out
+
+
+def pv_risk(hours: list[HourInput], p: BatteryParams) -> list[tuple[float, float] | None]:
+    """At index t (SoC entering hour t, the first hour of an expensive run after a cheap hour):
+    (battery-side kWh the house needs in the run with PV at ``pv_trust``, the run's buy price).
+
+    Objective only: a shortfall is priced as if bought at that price - the battery is charged
+    beforehand when it is cheaper, so a cloudy morning does not run on the expensive grid.
+    """
+    out: list[tuple[float, float] | None] = [None] * (len(hours) + 1)
+    if p.battery_first_above is None or p.pv_trust >= 1.0:
+        return out
+    thr = p.battery_first_above + 1e-9
+    room = (p.max_soc - p.min_soc) / 100 * p.capacity_kwh
+    for t in range(1, len(hours)):
+        if hours[t].buy > thr and hours[t - 1].buy <= thr:
+            need, k = 0.0, t
+            while k < len(hours) and hours[k].buy > thr:
+                need += max(0.0, hours[k].load - hours[k].pv * p.pv_trust)
+                k += 1
+            out[t] = (min(room, need / p.eta), hours[t].buy)
+    return out
+
+
+def risk_cost(risk: tuple[float, float] | None, stored_kwh: float) -> float:
+    """Price of the reserve shortfall (``stored_kwh``: battery energy above min SoC)."""
+    if risk is None:
+        return 0.0
+    need, price = risk
+    return max(0.0, need - stored_kwh) * price
 
 
 def _transition(
@@ -307,6 +341,7 @@ def optimize(
 
     T = len(hours)
     reserve = expensive_reserve(hours, p)
+    risk = pv_risk(hours, p)
     # State = (soc, holds grid energy, has reached full). The "full" flag is only tracked when a
     # periodic full charge (BMS balancing) is required; otherwise it stays True.
     track_full = p.require_full
@@ -347,7 +382,8 @@ def optimize(
                         nf = full or (done(s1) and (full_by is None or t < full_by))
                         # hurdle (objective only): selling grid-charged energy must earn the margin
                         hurdle = p.arbitrage_min_margin * st.battery_export if tainted else 0.0
-                        v = st.cost + hurdle + hold(s1) + V[t + 1][(s1, nt, nf)]
+                        rk = risk_cost(risk[t + 1], (s1 - lo) / 100 * p.capacity_kwh)
+                        v = st.cost + hurdle + hold(s1) + rk + V[t + 1][(s1, nt, nf)]
                         if best is None or v < best[0]:
                             best = (v, s1, nt, nf, st)
                     if best is None:  # should not happen: idle is always allowed unless limits
