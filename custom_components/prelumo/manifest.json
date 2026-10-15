@@ -4,6 +4,7 @@
   "after_dependencies": [
     "calendar",
     "esphome",
+    "lovelace",
     "weather"
   ],
   "codeowners": [
@@ -11,6 +12,8 @@
   ],
   "config_flow": true,
   "dependencies": [
+    "frontend",
+    "http",
     "recorder"
   ],
   "documentation": "https://github.com/porwisz/prelumo-ha",
@@ -19,5 +22,5 @@
   "issue_tracker": "https://github.com/porwisz/prelumo-ha/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.1.37"
+  "version": "0.1.38"
 }

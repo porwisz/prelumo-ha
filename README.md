@@ -92,6 +92,7 @@ Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo 
 
 ## Gdzie zobaczyć konfigurację i wyniki
 
+- **Panel „Prelumo” w pasku bocznym** — dashboard tworzony przez integrację (strategia Lovelace `custom:prelumo`, aktualizuje się z każdą wersją): harmonogram falownika vs propozycja (z mocami slotów), przebieg godzinowy, decyzje zapisu, prognozy i ceny RCE. Nie da się go edytować — to celowe.
 - **Ustawienia → Urządzenia i usługi → Prelumo → Konfiguruj** — parametry baterii, G13, Tesli, plan awaryjny.
 - **⋮ → Zmień konfigurację** (reconfigure) — encje źródłowe (RCE, Solcast, pogoda, PC, Tesla, awaria).
 - **⋮ → Pobierz diagnostykę** — jeden JSON: konfiguracja, modele, plan godzinowy, decyzje zapisu.

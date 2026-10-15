@@ -19,6 +19,7 @@ from .const import (
     DOMAIN, PLATFORMS, SERVICE_APPLY_PLAN, SERVICE_READ_PLAN, SERVICE_REPLAN, SERVICE_SET_SLOT,
 )
 from .coordinator import PrelumoCoordinator
+from .dashboard import async_remove_dashboard, async_setup_dashboard
 from .core.plan import MAX_POWER_W, DayPlan, PlanError, Slot, SlotMode
 from .ha_io.inputs import read_current_plan
 
@@ -51,6 +52,12 @@ def _coordinator(hass: HomeAssistant) -> PrelumoCoordinator:
     if not entries:
         raise ServiceValidationError(translation_domain=DOMAIN, translation_key="not_loaded")
     return entries[0].runtime_data
+
+
+def entry_version(hass: HomeAssistant) -> str:
+    """Integration version (cache-busts the dashboard module after an update)."""
+    from homeassistant.loader import async_get_loaded_integration
+    return str(async_get_loaded_integration(hass, DOMAIN).version or "0")
 
 
 def _hhmm(t: time) -> int:
@@ -131,6 +138,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PrelumoConfigEntry) -> b
     await coord.async_config_entry_first_refresh()
     entry.runtime_data = coord
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await async_setup_dashboard(hass, entry.runtime_data, entry_version(hass))
     entry.async_on_unload(entry.add_update_listener(_reload))
     # first plan once HA has started (sources from other integrations are loaded by then)
     async def _initial_plan(_event: Any = None) -> None:
@@ -150,5 +158,6 @@ async def _reload(hass: HomeAssistant, entry: PrelumoConfigEntry) -> None:
 async def async_unload_entry(hass: HomeAssistant, entry: PrelumoConfigEntry) -> bool:
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
+        async_remove_dashboard(hass)
         await entry.runtime_data.async_shutdown()
     return ok
