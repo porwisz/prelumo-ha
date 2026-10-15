@@ -104,6 +104,9 @@ function decisionsView(E, I) {
 
 #### Plan
 - **Bateria 100%:** {{ ('ostatnio ' ~ (as_timestamp(states('${F}')) | timestamp_custom(fmt))) if states('${F}') not in ['unknown','unavailable'] else 'brak w historii' }} · co {{ state_attr('${F}','interval_days') }} dni · {{ ('teraz należne — ' ~ ('zaplanowane ✅' if state_attr('${F}','planned') else 'nie mieści się w planie ⚠️')) if state_attr('${F}','due') else 'nie należne' }}
+{%- set evs = (state_attr('${F}','charge_events') or [])[-5:] %}
+{%- set ns = namespace(m=[]) %}{%- for e in evs %}{%- if e.minutes['99'] is defined %}{%- set ns.m = ns.m + [e.minutes['99'] | round(0) | int] %}{%- endif %}{%- endfor %}
+- **Ostatni 1% (99→100%):** {{ ('planowane ' ~ (ns.m | max) ~ ' min (najdłuższe z ' ~ (ns.m | count) ~ ' ostatnich ładowań: ' ~ (ns.m | join(', ')) ~ ' min)') if ns.m else 'jeszcze nie zmierzone — przyjęte ~30 min' }}
 - **Koszt w oknie {{ state_attr('${P}','slot_window_hours') }} h — plan / obecny w falowniku / bez Prelumo:** {{ state_attr('${P}','expected_cost') }} / {{ state_attr('${P}','current_plan_cost') if state_attr('${P}','current_plan_cost') is not none else '–' }} / {{ state_attr('${P}','baseline_cost') }} zł
 {%- set g = state_attr('${P}','gain_vs_current') %}
 - **Zysk vs obecny:** {{ ('obecny łamie reguły — do wymiany' if g > 1000 else (g ~ ' zł')) if g is not none else '–' }}

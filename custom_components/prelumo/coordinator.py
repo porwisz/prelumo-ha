@@ -41,6 +41,7 @@ from .core.optimizer import BatteryParams, Strategy
 from .core.plan import SLOT_COUNT, DayPlan, PlanError, Slot, SlotMode, same_behaviour
 from .core.planner import PlannerInputs, PlannerResult, horizon_hours, parse_fallback_plan, run_planner
 from .core.shadow import ShadowLedger, energy_cost
+from .core.taper import charge_events, merge_events, taper_from_events
 from .core.tariff import G13Tariff
 from .ha_io import inputs as io
 from .ha_io.inverter import InverterWriter
@@ -107,6 +108,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.plan_state = PlanState()
         # manual schedule draft (Edycja tab): follows the inverter until edited
         self._draft: list[Slot] | None = None
+        self.taper_events: list[dict] = []  # measured climbs to 100 % (minutes per SoC band)
         # runtime controls (restored by entities)
         self.strategy = Strategy.SELF_CONSUMPTION
         self.arbitrage = False
@@ -168,6 +170,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             soc_step=int(o[OPT_SOC_STEP]),
             max_grid_charge_price=self.max_grid_charge_price(),
             min_sell_soc=int(o[OPT_MIN_SELL_SOC]),
+            charge_taper=self.charge_taper(),
             sell_min_power_kw=float(o.get(OPT_SELL_MIN_POWER, 6.0)),
         )
 
@@ -198,6 +201,24 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             afternoon_peak_winter=_range(o[OPT_AFTERNOON_WINTER]),
         )
 
+    async def _learn_taper(self) -> None:
+        """Measure the BMS charge taper from the recent climbs to 100 % (raw SoC history)."""
+        end = dt_util.now()
+        try:
+            points = await io.soc_history(self.hass, self.inv.soc, end - timedelta(days=10), end)
+        except Exception as err:  # noqa: BLE001 - recorder may not be ready
+            _LOGGER.debug("SoC history lookup failed: %s", err)
+            return
+        merged = merge_events(self.taper_events, charge_events(points))
+        if merged != self.taper_events:
+            self.taper_events = merged
+            _LOGGER.info("Charge taper learned from %d charges: %s", len(merged),
+                         taper_from_events(merged, float(self.opt[OPT_CAPACITY])))
+            self._save()
+
+    def charge_taper(self) -> tuple[tuple[int, float], ...]:
+        return taper_from_events(self.taper_events, float(self.opt[OPT_CAPACITY]))
+
     def fallback_plan(self) -> DayPlan:
         power = int(min(12000, float(self.opt[OPT_MAX_DISCHARGE]) * 1000))
         return parse_fallback_plan(self.opt[OPT_FALLBACK_PLAN], power)
@@ -211,6 +232,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.last_learn = stored.get("last_learn")
         self.grid_energy = stored.get("grid_energy")
         self.ev_power_seen = stored.get("ev_power_seen")
+        self.taper_events = stored.get("taper_events") or []
+        await self._learn_taper()
         if self.grid_energy is None:  # first run: look it up in the history
             try:
                 self.grid_energy = await io.grid_charged_since_low(
@@ -252,6 +275,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 "last_full": self.full.last_full.isoformat() if self.full.last_full else None,
                 "grid_energy": self.grid_energy,
                 "ev_power_seen": self.ev_power_seen,
+                "taper_events": self.taper_events,
             },
             5,
         )
@@ -265,6 +289,10 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         was_due = self.full_charge_planned()
         if self.full.observe(data.soc, now):
             self._save()
+            # the climb to 100 % just finished: measure how long the last % took this time
+            self.config_entry.async_create_background_task(
+                self.hass, self._learn_taper(), f"{DOMAIN}_learn_taper"
+            )
             if was_due:  # balancing done -> back to the everyday limit at once
                 self.config_entry.async_create_background_task(
                     self.hass, self.async_replan(), f"{DOMAIN}_after_full_charge"

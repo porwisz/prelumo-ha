@@ -324,6 +324,25 @@ async def hourly_mean_temp(
     return await get_instance(hass).async_add_executor_job(_load)
 
 
+async def soc_history(
+    hass: HomeAssistant, entity_id: str, start: datetime, end: datetime
+) -> list[tuple[datetime, float]]:
+    """(time, SoC %) state changes, oldest first (raw history, ~10 days)."""
+
+    def _load() -> list[State]:
+        return history.state_changes_during_period(
+            hass, start, end, entity_id, no_attributes=True, include_start_time_state=True
+        ).get(entity_id, [])
+
+    out = []
+    for s in await get_instance(hass).async_add_executor_job(_load):
+        try:
+            out.append((dt_util.as_local(s.last_changed), float(s.state)))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 async def ev_sessions(
     hass: HomeAssistant, plugged_entity: str | None, ev_energy: dict[datetime, float],
     start: datetime, end: datetime,

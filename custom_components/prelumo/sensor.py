@@ -129,6 +129,9 @@ SENSORS: tuple[PrelumoSensorDescription, ...] = (
             "due": c.full.due(dt_util.now()),
             "planned": bool(c.plan_state.result and "full_charge_planned" in c.plan_state.result.notes),
             "max_charge_soc": int(c.opt["max_charge_soc"]),
+            # learned BMS taper: battery-side kW from each SoC; measured minutes per band
+            "charge_taper": [{"from_soc": a, "kw": kw} for a, kw in c.charge_taper()],
+            "charge_events": c.taper_events,
         },
     ),
     PrelumoSensorDescription(
