@@ -109,6 +109,7 @@
           "stale_hours": "Keep last plan for (hours) when data is missing",
           "fallback_plan": "Backup plan",
           "max_grid_charge_price": "Max price for grid charging",
+          "sell_min_power_kw": "Min sell slot power",
           "min_sell_soc": "Min SoC when selling",
           "min_gain": "Min gain to write a plan",
           "max_charge_soc": "Everyday max charge",
@@ -121,6 +122,7 @@
         "data_description": {
           "fallback_plan": "6 entries 'HH:MM SOC MODE' separated by ';', mode: none | grid_charge | sell",
           "max_grid_charge_price": "The battery charges from the grid only when the buy price is at or below this. 0 = lowest G13 price.",
+          "sell_min_power_kw": "A sell slot limits all battery output (the house too) to its power: kettle + oven above it would run on the grid. Sell slots never get less.",
           "min_sell_soc": "The battery never sells to the grid below this level.",
           "min_gain": "A new plan is written only if it is cheaper than the inverter's current schedule by at least this much per 24 h.",
           "max_charge_soc": "Prelumo plans the battery up to this level on normal days (the last % charge slowly).",

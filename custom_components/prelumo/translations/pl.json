@@ -109,6 +109,7 @@
           "stale_hours": "Trzymaj ostatni plan przez (h) przy braku danych",
           "fallback_plan": "Plan awaryjny",
           "max_grid_charge_price": "Maks. cena ładowania z sieci",
+          "sell_min_power_kw": "Min. moc slotu sprzedaży",
           "min_sell_soc": "Min. SoC przy sprzedaży",
           "min_gain": "Min. zysk do zapisu planu",
           "max_charge_soc": "Maks. ładowanie na co dzień",
@@ -121,6 +122,7 @@
         "data_description": {
           "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell",
           "max_grid_charge_price": "Bateria ładuje się z sieci tylko gdy cena zakupu ≤ tej wartości. 0 = najniższa cena z taryfy G13.",
+          "sell_min_power_kw": "Slot sprzedaży ogranicza całą moc baterii (także dla domu) do swojej mocy: czajnik + piekarnik ponad nią pobierają z sieci. Sloty sprzedaży nigdy nie dostają mniej.",
           "min_sell_soc": "Bateria nie sprzedaje do sieci poniżej tego poziomu.",
           "min_gain": "Nowy plan trafia do falownika tylko, gdy jest tańszy od obecnego o co najmniej tyle zł na 24 h.",
           "max_charge_soc": "Na co dzień Prelumo planuje baterię najwyżej do tego poziomu (ostatnie % ładują się długo).",

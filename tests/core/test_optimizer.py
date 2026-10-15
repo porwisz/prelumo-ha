@@ -379,7 +379,8 @@ def test_sell_slot_power_spreads_the_sale_over_the_slot():
     from core.compress import Segment, Setting, simulate, to_day_plan
     from core.plan import SlotMode
     hrs = day([1.5, 1.5, 0.63], [1.65, 1.6, 0.9], load=[1.0, 1.0, 0.5])
-    p = replace(P, max_soc=98, min_sell_soc=20, battery_first_above=0.63, max_grid_charge_price=0.63)
+    p = replace(P, max_soc=98, min_sell_soc=20, battery_first_above=0.63, max_grid_charge_price=0.63,
+                sell_min_power_kw=0)
     sts = [Setting(HourMode.SELL, 60), Setting(HourMode.SELL, 60), Setting(HourMode.NORMAL, 20)]
     detail: list[dict] = []
     powers: dict[int, float] = {}
@@ -552,7 +553,7 @@ def test_slots_hold_overnight_and_charge_late():
     sell = [0.3] * 11 + [1.35] * 2 + [0.7] * 5
     hrs = day(buy, sell, load=[0.4] * 18)
     p = BatteryParams(**{**P.__dict__, "min_soc": 20, "soc_step": 2, "max_grid_charge_price": 0.65,
-                         "battery_first_above": 0.7, "require_full": True})
+                         "battery_first_above": 0.7, "require_full": True, "sell_min_power_kw": 0})
     r = optimize(hrs, 80, p, Strategy.MAX_GRID_TRADING, arbitrage=True, grid_energy=True, full_by=18)
     segs, cost = compress(r.hours, hrs, 80, p, window=18, grid_energy=True)
     plan = to_day_plan(segs, hrs, p, soc_now=80)
@@ -592,3 +593,15 @@ def test_writes_are_paced_over_the_day():
     assert g.decide(a, c, night + timedelta(hours=1), gain=3.0)[0]  # large gain: urgent
     assert g.decide(a, c, night + timedelta(hours=1), gain=None)[0]  # current plan breaks rules
     assert g.decide(a, c, D0 + timedelta(hours=7), gain=1.0)[0]  # by 07:00 the budget is 3
+
+
+def test_sell_slot_power_never_below_the_house_peak():
+    # Export First caps all battery output at the slot power: a kettle + oven above it would
+    # come from the grid, so the sale is not spread below sell_min_power_kw
+    from dataclasses import replace
+    from core.compress import Setting, simulate
+    hrs = day([1.5, 1.5, 0.63], [1.65, 1.6, 0.9], load=[1.0, 1.0, 0.5])
+    p = replace(P, max_soc=98, min_sell_soc=20, sell_min_power_kw=6.0)
+    powers: dict[int, float] = {}
+    simulate(hrs, [Setting(HourMode.SELL, 60)] * 2 + [Setting(HourMode.NORMAL, 20)], 98, p, powers=powers)
+    assert powers[0] >= 6.0

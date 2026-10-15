@@ -142,7 +142,8 @@ def simulate(
                         run += 1
                     peak = max(max(0.0, x.load + x.ev - x.pv) for x in hours[i:i + run])
                     spread = max(0.0, soc - lo) * eta / run
-                    want = max(math.floor(spread * 10) / 10, math.ceil((peak + 0.3) * 10) / 10)
+                    want = max(math.floor(spread * 10) / 10, math.ceil((peak + 0.3) * 10) / 10,
+                               p.sell_min_power_kw)
                     run_kw = min(p.max_discharge_kw, p.grid_export_kw + peak, want)
                 if powers is not None:
                     powers[i] = run_kw

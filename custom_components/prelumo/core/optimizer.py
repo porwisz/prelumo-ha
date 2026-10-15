@@ -54,6 +54,9 @@ class BatteryParams:
     soc_step: int = 2
     max_grid_charge_price: float | None = None  # PLN/kWh; no grid charging above it (None = no limit)
     min_sell_soc: int = 20  # %; battery never exports below this SoC
+    # kW; a Deye sell slot (Export First) caps ALL battery output - the house too - at the slot
+    # power, so a sell slot never gets less (a kettle + oven above it would run on the grid)
+    sell_min_power_kw: float = 6.0
     require_full: bool = False  # periodic 100% charge due: plan must reach max_soc once
     # Above this buy price the battery covers the house first: no buying for the house while the
     # battery is above min SoC (no "buy expensive to sell later"). None = off.
