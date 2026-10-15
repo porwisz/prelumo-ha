@@ -25,3 +25,17 @@ class PrelumoEntity(CoordinatorEntity[PrelumoCoordinator]):
             model=TAGLINE,
             entry_type=DeviceEntryType.SERVICE,
         )
+
+
+class PrelumoSlotEntity(PrelumoEntity):
+    """One field of slot ``n`` (1-6) of the manual schedule draft."""
+
+    def __init__(self, coordinator: PrelumoCoordinator, n: int, field: str) -> None:
+        super().__init__(coordinator, f"slot{n}_{field}")
+        self._index = n - 1
+        self._attr_translation_key = f"slot_{field}"
+        self._attr_translation_placeholders = {"n": str(n)}
+
+    @property
+    def slot(self):
+        return self.coordinator.draft_slots()[self._index]

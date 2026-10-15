@@ -182,10 +182,57 @@ function rceView(R) {
   };
 }
 
+function editView(E, S) {
+  if (!S || !S.length) return null;
+  const A = E.active_slot;
+  const rows = S.map((x, i) => `{% set c = cur[${i}] if cur | count > ${i} else none -%}
+{% set d = (states('${x.start}')[:5], states('${x.mode}'), states('${x.soc}') | int(0), states('${x.power}') | float(0)) -%}
+{% set diff = c and (c.start != d[0] or c.mode != d[1] or c.soc != d[2] or (c.power / 1000) | round(1) != d[3] | round(1)) -%}
+| ${i + 1} | {{ (c.start ~ ' ' ~ ic.get(c.mode,'') ~ ' ' ~ c.soc ~ '% · ' ~ '%.1f' % (c.power / 1000) ~ ' kW') if c else '–' }} | {{ '**' if diff else '' }}{{ d[0] ~ ' ' ~ ic.get(d[1],'') ~ ' ' ~ d[2] ~ '% · ' ~ '%.1f' % d[3] ~ ' kW' }}{{ '** ✏️' if diff else '' }} |`).join("\n");
+  const summary = `{%- set ic = {'none':'🏠','grid_charge':'🔌','sell':'💰'} -%}
+{%- set cur = state_attr('${A}','slots') or [] -%}
+| # | W falowniku | Szkic |
+|:-:|:--|:--|
+${rows}
+
+✏️ = zmienione względem falownika. Slot trwa do startu następnego, ostatni do startu pierwszego. Starty muszą rosnąć.
+{%- if is_state('${E.auto_mode}', 'on') %}
+
+> ⚠️ **Sterowanie Prelumo jest włączone** — przy kolejnym przeliczeniu (co godzinę) Prelumo może zastąpić ręczny harmonogram swoim planem. Żeby został, wyłącz „Sterowanie”.
+{%- endif %}`;
+  const slotSection = (x, i) => ({
+    type: "grid", cards: [
+      { type: "heading", heading: `Slot ${i + 1}`, heading_style: "title" },
+      tile(x.start, "Start", 12),
+      tile(x.mode, "Tryb", 12, { features: [{ type: "select-options" }] }),
+      tile(x.soc, "SoC", 12, { features: [{ type: "numeric-input", style: "buttons" }], features_position: "inline" }),
+      tile(x.power, "Moc", 12, { features: [{ type: "numeric-input", style: "buttons" }], features_position: "inline" }),
+    ],
+  });
+  return {
+    title: "Edycja", path: "edycja", icon: "mdi:pencil", type: "sections", max_columns: 3,
+    sections: [
+      {
+        type: "grid", column_span: 3, cards: [
+          {
+            type: "heading", heading: "Ręczna edycja harmonogramu", icon: "mdi:pencil",
+            badges: [
+              { type: "button", icon: "mdi:download", text: "Wczytaj z falownika", tap_action: { action: "perform-action", perform_action: "button.press", target: { entity_id: E.draft_load } } },
+              { type: "button", icon: "mdi:upload", text: "Zapisz do falownika", color: "orange", tap_action: { action: "perform-action", perform_action: "button.press", target: { entity_id: E.draft_write }, confirmation: { text: "Zapisać ten harmonogram do falownika?" } } },
+            ],
+          },
+          md(summary),
+        ],
+      },
+      ...S.map(slotSection),
+    ],
+  };
+}
+
 class PrelumoDashboardStrategy extends HTMLElement {
   static async generate(config, hass) {
     const E = config.entities || {}, I = config.inverter || {}, R = config.rce || {};
-    const views = [planView(E, I), decisionsView(E, I), rceView(R)].filter(Boolean);
+    const views = [planView(E, I), editView(E, config.slots), decisionsView(E, I), rceView(R)].filter(Boolean);
     return { title: "Prelumo", views };
   }
 }

@@ -201,6 +201,14 @@
           "self_consumption": "Self-consumption",
           "max_grid_trading": "Max grid trading"
         }
+      },
+      "slot_mode": {
+        "name": "Slot {n} mode",
+        "state": {
+          "none": "Normal (battery powers the house)",
+          "grid_charge": "Grid charging",
+          "sell": "Sell"
+        }
       }
     },
     "switch": {
@@ -212,6 +220,27 @@
       },
       "grid_arbitrage": {
         "name": "Grid arbitrage"
+      }
+    },
+    "time": {
+      "slot_start": {
+        "name": "Slot {n} start"
+      }
+    },
+    "number": {
+      "slot_soc": {
+        "name": "Slot {n} SoC"
+      },
+      "slot_power": {
+        "name": "Slot {n} power"
+      }
+    },
+    "button": {
+      "draft_load": {
+        "name": "Load schedule from inverter"
+      },
+      "draft_write": {
+        "name": "Write schedule to inverter"
       }
     }
   },

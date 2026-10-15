@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -38,7 +38,7 @@ from .core.forecast.heatpump import HeatPumpModel
 from .core.forecast.load import LoadProfile, base_load_samples
 from .core.forecast.pv import PvBias
 from .core.optimizer import BatteryParams, Strategy
-from .core.plan import DayPlan, same_behaviour
+from .core.plan import SLOT_COUNT, DayPlan, PlanError, Slot, SlotMode, same_behaviour
 from .core.planner import PlannerInputs, PlannerResult, horizon_hours, parse_fallback_plan, run_planner
 from .core.shadow import ShadowLedger, energy_cost
 from .core.tariff import G13Tariff
@@ -47,6 +47,7 @@ from .ha_io.inverter import InverterWriter
 
 _LOGGER = logging.getLogger(__name__)
 
+MAX_DRAFT_POWER = 10000  # W, default slot power when nothing can be read
 WRITE_SETTLE = timedelta(minutes=5)  # max time the work mode follows the written plan
 
 
@@ -104,6 +105,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         )
         self.store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}")
         self.plan_state = PlanState()
+        # manual schedule draft (Edycja tab): follows the inverter until edited
+        self._draft: list[Slot] | None = None
         # runtime controls (restored by entities)
         self.strategy = Strategy.SELF_CONSUMPTION
         self.arbitrage = False
@@ -550,6 +553,46 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         )
 
     # --- manual actions --------------------------------------------------
+    # --- manual schedule draft -------------------------------------------
+    def draft_slots(self) -> list[Slot]:
+        """The draft being edited, or the schedule now on the inverter."""
+        if self._draft is not None:
+            return self._draft
+        cur = io.read_current_plan(self.hass, self.inv)
+        if cur is not None:
+            return list(cur.slots)
+        return [Slot(h * 400, MAX_DRAFT_POWER, 20) for h in range(SLOT_COUNT)]
+
+    @property
+    def draft_dirty(self) -> bool:
+        return self._draft is not None
+
+    @callback
+    def draft_set(self, index: int, **changes: Any) -> None:
+        slots = self.draft_slots()
+        mode = changes.pop("mode", None)
+        slot = replace(slots[index], **changes)
+        if mode is not None:
+            slot = slot.with_mode(SlotMode(mode))
+        slots = list(slots)
+        slots[index] = slot
+        self._draft = slots
+        self.async_update_listeners()
+
+    @callback
+    def draft_reset(self) -> None:
+        """Back to the schedule on the inverter."""
+        self._draft = None
+        self.async_update_listeners()
+
+    async def async_write_draft(self) -> None:
+        try:
+            plan = DayPlan(tuple(self.draft_slots()))
+        except PlanError as err:
+            raise HomeAssistantError(f"Harmonogram niepoprawny: {err}") from err
+        await self.async_apply(plan)
+        self.draft_reset()
+
     async def async_apply(self, plan: DayPlan) -> None:
         current = io.read_current_plan(self.hass, self.inv)
         merged = plan.merge_preserved_flags(current)

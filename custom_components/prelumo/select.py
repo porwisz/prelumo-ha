@@ -10,13 +10,17 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from . import PrelumoConfigEntry
 from .const import STRATEGY_OPTIONS
 from .core.optimizer import Strategy
-from .entity import PrelumoEntity
+from .core.plan import SLOT_COUNT, SlotMode
+from .entity import PrelumoEntity, PrelumoSlotEntity
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: PrelumoConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
-    async_add_entities([StrategySelect(entry.runtime_data, "strategy")])
+    c = entry.runtime_data
+    async_add_entities(
+        [StrategySelect(c, "strategy")] + [SlotModeSelect(c, n, "mode") for n in range(1, SLOT_COUNT + 1)]
+    )
 
 
 class StrategySelect(PrelumoEntity, SelectEntity, RestoreEntity):
@@ -37,3 +41,17 @@ class StrategySelect(PrelumoEntity, SelectEntity, RestoreEntity):
         self.coordinator.strategy = Strategy(option)
         self.async_write_ha_state()
         self.hass.async_create_task(self.coordinator.async_replan())
+
+
+class SlotModeSelect(PrelumoSlotEntity, SelectEntity):
+    """Manual schedule draft: slot mode (normal / grid charge / sell)."""
+
+    _platform = "select"
+    _attr_options = [m.value for m in SlotMode]
+
+    @property
+    def current_option(self) -> str:
+        return self.slot.mode.value
+
+    async def async_select_option(self, option: str) -> None:
+        self.coordinator.draft_set(self._index, mode=option)

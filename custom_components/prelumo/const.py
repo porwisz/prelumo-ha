@@ -8,7 +8,7 @@ from typing import Final
 DOMAIN: Final = "prelumo"
 TAGLINE: Final = "Prelumo — one step ahead of the sun"
 
-PLATFORMS: Final = ["sensor", "binary_sensor", "select", "switch"]
+PLATFORMS: Final = ["sensor", "binary_sensor", "select", "switch", "time", "number", "button"]
 
 UPDATE_INTERVAL: Final = timedelta(seconds=30)
 PLAN_MINUTE: Final = 3  # hourly re-plan at HH:03

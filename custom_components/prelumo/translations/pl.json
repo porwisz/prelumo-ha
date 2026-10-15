@@ -201,6 +201,14 @@
           "self_consumption": "Autokonsumpcja",
           "max_grid_trading": "Maks. handel z siecią"
         }
+      },
+      "slot_mode": {
+        "name": "Slot {n} tryb",
+        "state": {
+          "none": "Normalny (bateria zasila dom)",
+          "grid_charge": "Ładowanie z sieci",
+          "sell": "Sprzedaż"
+        }
       }
     },
     "switch": {
@@ -212,6 +220,27 @@
       },
       "grid_arbitrage": {
         "name": "Arbitraż z siecią"
+      }
+    },
+    "time": {
+      "slot_start": {
+        "name": "Slot {n} start"
+      }
+    },
+    "number": {
+      "slot_soc": {
+        "name": "Slot {n} SoC"
+      },
+      "slot_power": {
+        "name": "Slot {n} moc"
+      }
+    },
+    "button": {
+      "draft_load": {
+        "name": "Wczytaj harmonogram z falownika"
+      },
+      "draft_write": {
+        "name": "Zapisz harmonogram do falownika"
       }
     }
   },

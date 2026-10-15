@@ -44,8 +44,16 @@ def _strategy(hass: HomeAssistant, coord: Any) -> dict[str, Any]:
     ents = {}
     for platform, key in _KEYS:
         ents[key] = reg.async_get_entity_id(platform, DOMAIN, f"{entry_id}_{key}") or f"{platform}.{DOMAIN}_{key}"
+    for platform, key in (("button", "draft_load"), ("button", "draft_write")):
+        ents[key] = reg.async_get_entity_id(platform, DOMAIN, f"{entry_id}_{key}") or f"{platform}.{DOMAIN}_{key}"
+    slots = [
+        {f: reg.async_get_entity_id(p, DOMAIN, f"{entry_id}_slot{n}_{f}") or f"{p}.{DOMAIN}_slot{n}_{f}"
+         for p, f in (("time", "start"), ("number", "soc"), ("number", "power"), ("select", "mode"))}
+        for n in range(1, 7)
+    ]
     inv = coord.inv
     return {
+        "slots": slots,
         "type": f"custom:{DOMAIN}",
         "entities": ents,
         "inverter": {
