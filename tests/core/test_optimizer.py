@@ -577,3 +577,18 @@ def test_full_charge_starts_early_enough_for_the_taper():
     r = optimize(day(buy, sell), 80, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
     assert r.hours[7].soc_end == 100
     assert r.hours[6].soc_end < 100 and r.hours[6].mode is HourMode.GRID_CHARGE  # starts an hour earlier
+
+
+def test_writes_are_paced_over_the_day():
+    a = parse_fallback_plan("00:00 20; 05:00 80 grid_charge; 07:00 20; 13:00 20; 16:00 50 grid_charge; 21:00 20")
+    c = parse_fallback_plan("00:00 20 none; 05:00 80 grid_charge; 07:00 20; 13:00 20; 16:00 50 sell; 21:00 20")
+    g = WriteGuard(WritePolicy(max_writes_per_day=6))
+    night = D0 + timedelta(hours=2)
+    g.history = [D0 + timedelta(minutes=3)]
+    # 02:00: budget 1 + ceil(5 * 2/24) = 2 -> one more small write allowed, then paced
+    assert g.decide(a, c, night, gain=1.0)[0]
+    g.record(night)
+    assert g.decide(a, c, night + timedelta(hours=1), gain=1.0)[1][0] == "write_budget_paced"
+    assert g.decide(a, c, night + timedelta(hours=1), gain=3.0)[0]  # large gain: urgent
+    assert g.decide(a, c, night + timedelta(hours=1), gain=None)[0]  # current plan breaks rules
+    assert g.decide(a, c, D0 + timedelta(hours=7), gain=1.0)[0]  # by 07:00 the budget is 3

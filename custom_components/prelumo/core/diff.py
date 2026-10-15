@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -17,6 +18,10 @@ class WritePolicy:
     min_interval: timedelta = timedelta(minutes=50)
     min_gain: float = 0.5  # PLN per window; smaller improvements are not worth a flash write
     window_h: int = 24  # behaviour is compared over this many hours
+    # Writes are paced over the day: by a given hour only part of the daily limit may be used
+    # (1 + the rest pro rata), unless the current plan breaks rules or the gain is this many
+    # times min_gain. Small night-time tweaks no longer use up the writes needed in the day.
+    urgent_gain_factor: float = 5.0
 
 
 def material_changes(
@@ -62,6 +67,15 @@ class WriteGuard:
             return False, "min_interval"
         return True, None
 
+    def budget(self, now: datetime) -> int:
+        """Writes the pacing allows so far today."""
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        frac = (now - midnight) / timedelta(days=1)
+        return min(self.policy.max_writes_per_day, 1 + math.ceil((self.policy.max_writes_per_day - 1) * frac))
+
+    def _today(self, now: datetime) -> list[datetime]:
+        return [t for t in self.history if t.astimezone(now.tzinfo).date() == now.date()]
+
     def status(self, now: datetime) -> dict:
         """Writes today and the earliest time the next automatic write is allowed."""
         today = sorted(t for t in self.history if t.astimezone(now.tzinfo).date() == now.date())
@@ -75,6 +89,7 @@ class WriteGuard:
             "max_writes_per_day": self.policy.max_writes_per_day,
             "min_interval_min": int(self.policy.min_interval.total_seconds() // 60),
             "min_gain": self.policy.min_gain,
+            "write_budget_now": self.budget(now),
             "next_write_allowed": nxt.isoformat(),
         }
 
@@ -92,4 +107,7 @@ class WriteGuard:
         ok, why = self.allowed(now)
         if not ok:
             return False, [why or "blocked", *reasons]
+        urgent = old is None or gain is None or gain >= self.policy.urgent_gain_factor * self.policy.min_gain
+        if not urgent and len(self._today(now)) >= self.budget(now):
+            return False, ["write_budget_paced", *reasons]
         return True, reasons
