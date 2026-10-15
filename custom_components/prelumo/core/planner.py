@@ -48,6 +48,9 @@ class PlannerResult:
     slot_plan_issues: list[str] = field(default_factory=list)
     current_plan_money: float | None = None
     current_plan_issues: list[str] = field(default_factory=list)
+    # cost (PLN, money only) of each of the 6 slots within the window; None = slot not in the window
+    slot_costs: list[float | None] = field(default_factory=list)
+    current_slot_costs: list[float | None] = field(default_factory=list)
 
     @property
     def gain_vs_current(self) -> float | None:
@@ -133,7 +136,17 @@ def run_planner(
         notes.append(f"sell_price_missing_{missing}h")
     return PlannerResult(plan, hin, opt, segs, slot_cost, base, missing, notes, cur_cost,
                          slot_hourly, current_hourly, slot_cost - _penalties(slot_issues), slot_issues,
-                         cur_money, cur_issues)
+                         cur_money, cur_issues, slot_costs(plan, day, slot_hourly),
+                         slot_costs(current, day, current_hourly) if current is not None else [])
+
+
+def slot_costs(plan: DayPlan, hours: list[HourInput], detail: list[dict]) -> list[float | None]:
+    """Sum the simulated hourly costs per slot (the slot active at each hour's start)."""
+    out: list[float | None] = [None] * len(plan.slots)
+    for h, d in zip(hours, detail):
+        i = plan.active_index(h.start)
+        out[i] = (out[i] or 0.0) + d["cost"]
+    return [None if c is None else round(c, 2) for c in out]
 
 
 def _penalties(issues: list[str]) -> float:

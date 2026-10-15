@@ -68,6 +68,8 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "hourly": [h.as_dict() for h in r.optimum.hours] if r else None,
         "slot_hourly": r.slot_hourly if r else None,
         "current_hourly": r.current_hourly if r else None,
+        "slot_costs": r.slot_costs if r else None,
+        "current_slot_costs": r.current_slot_costs if r else None,
         "slot_window_hours": int(c.opt["slot_window_hours"]),
         # money only; hard rules a schedule breaks are listed in *_issues
         "expected_cost": round(r.slot_plan_money, 2) if r else None,

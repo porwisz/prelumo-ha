@@ -10,17 +10,23 @@ function planView(E, I) {
 {%- set cur = state_attr('${A}','slots') or [] -%}
 {%- set pro = state_attr('${P}','slots') or [] -%}
 {%- set act = state_attr('${A}','slot') -%}
-| # | Falownik teraz | Moc | Prelumo proponuje | Moc |
-|:-:|:--|--:|:--|--:|
+{%- set kc = state_attr('${P}','current_slot_costs') or [] -%}
+{%- set kp = state_attr('${P}','slot_costs') or [] -%}
+{%- macro zl(v) -%}{{ ('%.2f zł' % v) if v is not none else '–' }}{%- endmacro -%}
+| # | Falownik teraz | Moc | Koszt | Prelumo proponuje | Moc | Koszt |
+|:-:|:--|--:|--:|:--|--:|--:|
 {% for i in range(6) -%}
 {%- set c = cur[i] if cur | count > i else none -%}
 {%- set q = pro[i] if pro | count > i else none -%}
 {%- set on = act is not none and act == i + 1 -%}
-| {{ ('▶️ ' if on else '') ~ (i + 1) }} | {{ (('**' if on else '') ~ c.start ~ ' ' ~ ic.get(c.mode,'') ~ ' ' ~ c.soc ~ '%' ~ ('**' if on else '')) if c else '–' }} | {{ ('%.1f kW' % (c.power / 1000)) if c else '–' }} | {{ (q.start ~ ' ' ~ ic.get(q.mode,'') ~ ' ' ~ q.soc ~ '%') if q else '–' }} | {{ ('%.1f kW' % (q.power / 1000)) if q else '–' }} |
-{% endfor %}
+| {{ ('▶️ ' if on else '') ~ (i + 1) }} | {{ (('**' if on else '') ~ c.start ~ ' ' ~ ic.get(c.mode,'') ~ ' ' ~ c.soc ~ '%' ~ ('**' if on else '')) if c else '–' }} | {{ ('%.1f kW' % (c.power / 1000)) if c else '–' }} | {{ zl(kc[i] if kc | count > i else none) }} | {{ (q.start ~ ' ' ~ ic.get(q.mode,'') ~ ' ' ~ q.soc ~ '%') if q else '–' }} | {{ ('%.1f kW' % (q.power / 1000)) if q else '–' }} | {{ zl(kp[i] if kp | count > i else none) }} |
+{% endfor -%}
+{%- set sc = kc | reject('none') | sum -%}{%- set sp = kp | reject('none') | sum -%}
+| | **Razem w oknie {{ state_attr('${P}','slot_window_hours') }} h** | | **{{ zl(sc) if kc else '–' }}** | | | **{{ zl(sp) if kp else '–' }}** |
+
 Tryb pracy teraz: **{{ states('${I.mode_select}') }}** · Prelumo chce: **{{ state_attr('${A}','desired_mode') or '–' }}** · następna zmiana {{ as_timestamp(states('${E.next_change}')) | timestamp_custom('%H:%M') if states('${E.next_change}') not in ['unknown','unavailable'] else '–' }}
 
-🏠 bateria zasila dom do progu SoC · 🔌 ładowanie z sieci do SoC · 💰 sprzedaż do SoC · Moc = limit całej mocy baterii w slocie (w 💰 także dla domu)`;
+🏠 bateria zasila dom do progu SoC · 🔌 ładowanie z sieci do SoC · 💰 sprzedaż do SoC · Moc = limit całej mocy baterii w slocie (w 💰 także dla domu) · Koszt = zakup − sprzedaż + zużycie baterii w godzinach slotu w oknie planu (ujemny = zarobek; – = slot poza oknem)`;
 
   const hourly = `{%- set ic = {'normal':'🏠','grid_charge':'🔌','sell':'💰'} -%}
 {%- set h = state_attr('${P}','slot_hourly') or [] -%}

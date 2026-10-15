@@ -614,3 +614,11 @@ def test_same_behaviour_ignores_power_and_spots_a_stale_flag():
     mixed = parse_fallback_plan("10:00 20 sell; 13:00 100 grid_charge; 16:00 20; 18:00 46 sell; 20:00 24 sell; 21:00 24")
     assert same_behaviour(a, b)
     assert not same_behaviour(a, mixed)
+
+
+def test_slot_costs_sum_the_hours_of_each_slot():
+    from core.planner import slot_costs
+    plan = parse_fallback_plan("00:00 20; 02:00 80 grid_charge; 04:00 20; 13:00 20; 16:00 50 sell; 21:00 20")
+    hrs = day([0.6] * 5, [0.3] * 5)
+    detail = [{"cost": c} for c in (1.0, 2.0, 3.0, 4.0, -1.5)]
+    assert slot_costs(plan, hrs, detail) == [3.0, 7.0, -1.5, None, None, None]
