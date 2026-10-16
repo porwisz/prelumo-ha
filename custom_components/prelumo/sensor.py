@@ -53,6 +53,8 @@ def _proposed(c: PrelumoCoordinator) -> str | None:
 def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
     ps = c.plan_state
     r = ps.result
+    if r is not None and c.data is not None:
+        r.evaluate_current(c.data.current_plan)  # the inverter may have changed since the run
     return {
         "computed_at": ps.computed_at.isoformat() if ps.computed_at else None,
         "strategy": c.strategy.value,

@@ -174,6 +174,10 @@ def test_current_plan_cost_and_gain():
     worse = parse_fallback_plan("00:00 10 none; 05:00 10; 07:00 10; 13:00 10; 16:00 10; 21:00 10")
     vs_worse = run_planner(inp, P, Strategy.MAX_GRID_TRADING, arbitrage=False, current=worse)
     assert vs_worse.gain_vs_current > 0.5
+    # the inverter now runs the proposal: the stored result follows it without a new run
+    vs_worse.evaluate_current(vs_worse.plan)
+    assert abs(vs_worse.gain_vs_current) < 0.01
+    assert vs_worse.current_slot_costs == vs_worse.slot_costs
 
 
 def test_plan_violations():

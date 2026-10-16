@@ -51,6 +51,30 @@ class PlannerResult:
     # cost (PLN, money only) of each of the 6 slots within the window; None = slot not in the window
     slot_costs: list[float | None] = field(default_factory=list)
     current_slot_costs: list[float | None] = field(default_factory=list)
+    # what the current_* fields were computed from, so they can follow the inverter between runs
+    current: DayPlan | None = None
+    _ctx: tuple | None = field(default=None, repr=False)
+
+    def evaluate_current(self, current: DayPlan | None) -> None:
+        """(Re)compute the current_* fields for the schedule now on the inverter (no-op if unchanged)."""
+        if self._ctx is None or current == self.current:
+            return
+        day, soc, params, strategy, grid_energy = self._ctx
+        self.current = current
+        self.current_plan_cost = self.current_plan_money = None
+        self.current_hourly, self.current_plan_issues, self.current_slot_costs = [], [], []
+        self.notes = [n for n in self.notes if not n.startswith("current_plan_violates:")]
+        if current is None:
+            return
+        cost = simulate(day, settings_from_plan(current, day), soc, params, detail=self.current_hourly,
+                        grid_energy=grid_energy, violations=self.current_plan_issues)[0]
+        self.current_plan_money = cost - _penalties(self.current_plan_issues)
+        self.current_slot_costs = slot_costs(current, day, self.current_hourly)
+        broken = plan_violations(current, day, params, strategy)
+        if broken:  # must be replaceable regardless of cost
+            self.notes.append("current_plan_violates:" + ",".join(broken))
+        else:
+            self.current_plan_cost = cost
 
     @property
     def gain_vs_current(self) -> float | None:
@@ -119,25 +143,14 @@ def run_planner(
                          grid_energy=inp.grid_energy, violations=slot_issues)[0]
     base = simulate_baseline(day, inp.soc, params)
     notes = list(opt.notes)
-    cur_cost = None
-    current_hourly: list[dict] = []
-    cur_issues: list[str] = []
-    cur_money = None
-    if current is not None:
-        cost_now = simulate(day, settings_from_plan(current, day), inp.soc, params, detail=current_hourly,
-                            grid_energy=inp.grid_energy, violations=cur_issues)[0]
-        cur_money = cost_now - _penalties(cur_issues)
-        broken = plan_violations(current, day, params, strategy)
-        if broken:  # must be replaceable regardless of cost
-            notes.append("current_plan_violates:" + ",".join(broken))
-        else:
-            cur_cost = cost_now
     if missing:
         notes.append(f"sell_price_missing_{missing}h")
-    return PlannerResult(plan, hin, opt, segs, slot_cost, base, missing, notes, cur_cost,
-                         slot_hourly, current_hourly, slot_cost - _penalties(slot_issues), slot_issues,
-                         cur_money, cur_issues, slot_costs(plan, day, slot_hourly),
-                         slot_costs(current, day, current_hourly) if current is not None else [])
+    res = PlannerResult(plan, hin, opt, segs, slot_cost, base, missing, notes, None,
+                        slot_hourly, [], slot_cost - _penalties(slot_issues), slot_issues,
+                        slot_costs=slot_costs(plan, day, slot_hourly),
+                        _ctx=(day, inp.soc, params, strategy, inp.grid_energy))
+    res.evaluate_current(current)
+    return res
 
 
 def slot_costs(plan: DayPlan, hours: list[HourInput], detail: list[dict]) -> list[float | None]:
