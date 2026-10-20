@@ -77,7 +77,9 @@ poniżej tej ceny RCE sprzedaż traci pieniądze.
   Export First. Plan i tak nie planuje sprzedaży bez dodatniej ceny (twarda reguła
   `sell_without_price`), ale ten próg jest sprawdzany **na żywo co 30 s**, więc działa też wtedy,
   gdy plan jest stary albo cena się zmieniła. Brak ceny dla danej godziny też blokuje eksport.
-  Widoczne jako atrybut `export_blocked` w `sensor.prelumo_active_slot`.
+  Widoczne jako atrybut `export_blocked` w `sensor.prelumo_active_slot`. Ceny godzinowe RCE są
+  zapisywane (3 dni), więc zaraz po restarcie ten sprawdzian nie jest „niewidzący” — bez tego
+  eksport byłby blokowany do pierwszego przeliczenia planu.
 - **Min. SoC przy sprzedaży** (domyślnie 20%) — bateria nie sprzedaje do sieci poniżej tego poziomu;
   slot Sell nigdy nie dostaje niższego progu.
 

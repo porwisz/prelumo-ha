@@ -52,6 +52,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_DRAFT_POWER = 10000  # W, default slot power when nothing can be read
 WRITE_SETTLE = timedelta(minutes=5)  # max time the work mode follows the written plan
+SELL_SEEN_KEEP = timedelta(days=3)  # how long hourly sell prices are kept
 
 
 @dataclass
@@ -144,7 +145,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self._plan_lock = asyncio.Lock()
         self._yesterday_pv_forecast: dict[datetime, float] = {}
         self._today_pv_forecast: dict[datetime, float] = {}
-        self._sell_seen: dict[datetime, float] = {}  # hourly RCE, kept ~3 days for actual cost
+        # hourly RCE, kept ~3 days: for yesterday's actual cost and for the live export check
+        # right after a restart (persisted, so that check is not blind until the first re-plan)
+        self._sell_seen: dict[datetime, float] = {}
         self._last_recover: datetime | None = None
         self._models_ready = False  # load profile / heat pump / EV models are not persisted
         self._unsub: list = []
@@ -278,6 +281,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.ev_pattern = EvPattern.from_dict(stored.get("ev_pattern"))
         self.ledger = ShadowLedger.from_dict(stored.get("shadow"))
         self.stock = BatteryStock.from_dict(stored.get("stock"))
+        self._sell_seen = self._load_sell_seen(stored.get("sell_seen"))
         self.last_learn = stored.get("last_learn")
         self.grid_energy = stored.get("grid_energy")
         self.ev_power_seen = stored.get("ev_power_seen")
@@ -320,6 +324,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 "ev_pattern": self.ev_pattern.to_dict(),
                 "shadow": self.ledger.to_dict(),
                 "stock": self.stock.to_dict(),
+                "sell_seen": {h.isoformat(): v for h, v in self._sell_seen.items()},
                 "last_learn": self.last_learn,
                 "writes": [t.isoformat() for t in self.guard.history],
                 "last_full": self.full.last_full.isoformat() if self.full.last_full else None,
@@ -329,6 +334,20 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             },
             5,
         )
+
+    def _load_sell_seen(self, stored: dict | None) -> dict[datetime, float]:
+        """Restore the recent hourly sell prices, dropping anything older than the window."""
+        now = dt_util.now()
+        out: dict[datetime, float] = {}
+        for key, value in (stored or {}).items():
+            dt = dt_util.parse_datetime(key)
+            if dt is None or now - dt_util.as_local(dt) >= SELL_SEEN_KEEP:
+                continue
+            try:
+                out[dt_util.as_local(dt)] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return out
 
     # --- 30 s loop: state + work-mode control ------------------------------
     async def _async_update_data(self) -> PrelumoData:
@@ -596,7 +615,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             sell_hourly.setdefault(ts.replace(minute=0, second=0, microsecond=0), []).append(p)
         sell_h = {h: sum(v) / len(v) for h, v in sell_hourly.items()}
         self._sell_seen.update(sell_h)
-        self._sell_seen = {h: v for h, v in self._sell_seen.items() if now - h < timedelta(days=3)}
+        self._sell_seen = {h: v for h, v in self._sell_seen.items() if now - h < SELL_SEEN_KEEP}
         if not any(h in sell_h for h in hours[:12]):
             stale.append("sell_prices")
 

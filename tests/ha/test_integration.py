@@ -315,3 +315,35 @@ async def test_weather_alert_charges_to_full_ignoring_the_price_cap(hass: HomeAs
     assert p.max_grid_charge_price is None  # charge at any price
     assert p.battery_first_above is None
     assert hass.states.get("binary_sensor.prelumo_alert_charge").state == "on"
+
+
+async def test_sell_prices_survive_a_restart(hass: HomeAssistant, setup) -> None:
+    """Right after a restart the live export check must not be blind: without the stored prices
+    it would refuse Export First until the first re-plan."""
+    from homeassistant.util import dt as dt_util
+    entry, _ = setup
+    coord = entry.runtime_data
+    await coord.async_replan()
+    assert coord._sell_seen
+    stored = {h.isoformat(): v for h, v in coord._sell_seen.items()}
+
+    back = coord._load_sell_seen(stored)
+    assert back == coord._sell_seen
+    hour = dt_util.now().replace(minute=0, second=0, microsecond=0)
+    assert hour in back  # this hour's price, so the check works before the first re-plan
+
+    coord._sell_seen = {}
+    assert coord._export_blocked(dt_util.now()) is True  # what it looked like before
+    coord._sell_seen = coord._load_sell_seen(stored)
+    assert coord._export_blocked(dt_util.now()) is False
+
+
+async def test_stored_sell_prices_older_than_the_window_are_dropped(hass: HomeAssistant, setup) -> None:
+    from datetime import timedelta
+    from homeassistant.util import dt as dt_util
+    entry, _ = setup
+    coord = entry.runtime_data
+    old = (dt_util.now() - timedelta(days=4)).replace(minute=0, second=0, microsecond=0)
+    fresh = dt_util.now().replace(minute=0, second=0, microsecond=0)
+    back = coord._load_sell_seen({old.isoformat(): 0.5, fresh.isoformat(): 0.9, "nonsense": 1.0})
+    assert back == {fresh: 0.9}
