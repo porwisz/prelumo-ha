@@ -20,7 +20,7 @@ async def async_setup_entry(
     c = entry.runtime_data
     async_add_entities([
         SellNow(c, "sell_now"), GridOutage(c, "grid_outage"), FallbackActive(c, "fallback_active"),
-        FullChargeDue(c, "full_charge_due"),
+        FullChargeDue(c, "full_charge_due"), EmergencyCharge(c, "alert_charge"),
     ])
 
 
@@ -56,3 +56,24 @@ class FullChargeDue(PrelumoEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         return self.coordinator.full_charge_due()
+
+
+class EmergencyCharge(PrelumoEntity, BinarySensorEntity):
+    """On while Prelumo charges for a coming power cut (weather warning or announced outage)."""
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.alert_charge() is not None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        a = self.coordinator.alert_charge()
+        return {
+            "reason": a.reason if a else None,
+            "target_soc": a.soc if a else None,
+            "hours_left": a.by_hours if a else None,
+            "weather_alert": self.coordinator.alert_on,
+            "planned_outage": (
+                self.coordinator.planned_outage.isoformat() if self.coordinator.planned_outage else None
+            ),
+        }

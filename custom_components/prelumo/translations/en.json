@@ -25,7 +25,9 @@
           "weather": "Weather (temperature forecast)",
           "heat_pump_power": "Heat pump power",
           "outage_entity": "Grid outage indicator (voltage or binary sensor)",
-          "outage_threshold": "Outage below voltage"
+          "outage_threshold": "Outage below voltage",
+          "alert_entity": "Weather warnings (MeteoAlarm / IMGW)",
+          "outage_calendar": "Calendar of announced outages"
         }
       },
       "ev": {
@@ -63,7 +65,9 @@
           "ev_manual_soc": "Manual target SoC (input_number)",
           "ev_manual_ready": "Manual ready-by time (input_datetime)",
           "write_action": "Schedule write action",
-          "mode_select": "Work mode select"
+          "mode_select": "Work mode select",
+          "alert_entity": "Weather warnings (MeteoAlarm / IMGW)",
+          "outage_calendar": "Calendar of announced outages"
         }
       }
     },
@@ -115,11 +119,14 @@
           "max_charge_soc": "Everyday max charge",
           "full_charge_days": "Full charge every (days)",
           "battery_first_in_expensive_hours": "Battery first in expensive hours",
-          "pv_trust": "PV forecast trusted for the reserve",
           "pv_trust": "Before expensive hours the battery holds what the house needs there if PV gave only this share of the forecast (100 % = trust the forecast).",
           "reserve_margin": "Reserve margin for expensive hours",
           "arbitrage_min_margin": "Min. arbitrage profit",
-          "slot_window_hours": "Schedule window"
+          "slot_window_hours": "Schedule window",
+          "force_sell_price": "Forced sell price",
+          "block_export_price": "Export block price",
+          "alert_soc": "Emergency charge SoC",
+          "alert_lead_hours": "Lead time before an outage"
         },
         "data_description": {
           "fallback_plan": "6 entries 'HH:MM SOC MODE' separated by ';', mode: none | grid_charge | sell",
@@ -132,7 +139,11 @@
           "battery_first_in_expensive_hours": "When the buy price is above the max grid-charge price, the house runs on the battery down to min SoC - no buying from the grid to sell the battery later.",
           "reserve_margin": "With battery first on: the battery sells only above the forecast house and heat-pump need for the remaining expensive hours, plus this margin.",
           "arbitrage_min_margin": "Energy bought from the grid is sold only when the sale earns at least this much per kWh over its purchase price (after losses and wear). Applies with grid arbitrage on.",
-          "slot_window_hours": "The optimiser plans the whole horizon, but the 6 inverter slots are built from (and judged on) only the next N hours; Prelumo re-plans every hour anyway."
+          "slot_window_hours": "The optimiser plans the whole horizon, but the 6 inverter slots are built from (and judged on) only the next N hours; Prelumo re-plans every hour anyway.",
+          "force_sell_price": "Above this RCE price the battery sells past the reserve for the expensive hours - the house then buys from the grid, because the sale earns more. 0 = off.",
+          "block_export_price": "At or below this RCE price Prelumo never selects Export First - checked live every 30 s, also when the plan is old. No price for the hour blocks exporting too.",
+          "alert_soc": "Prelumo charges the battery to this level on a weather warning and before an announced outage - with no charge price cap and no battery-first rule. 0 = off.",
+          "alert_lead_hours": "How many hours before an announced outage starts the battery should already be charged."
         }
       }
     },
@@ -169,6 +180,9 @@
       "shadow_savings": {
         "name": "Shadow-mode savings"
       },
+      "battery_energy_cost": {
+        "name": "Average cost of energy in the battery"
+      },
       "ev_energy_needed": {
         "name": "Tesla energy needed"
       },
@@ -180,6 +194,12 @@
       },
       "last_full_charge": {
         "name": "Last full charge"
+      },
+      "self_sufficiency": {
+        "name": "Self-sufficiency (30 days)"
+      },
+      "battery_cycles": {
+        "name": "Battery cycles"
       }
     },
     "binary_sensor": {
@@ -194,6 +214,9 @@
       },
       "full_charge_due": {
         "name": "Full charge due"
+      },
+      "alert_charge": {
+        "name": "Emergency charge"
       }
     },
     "select": {

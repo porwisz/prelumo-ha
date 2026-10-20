@@ -16,6 +16,9 @@
       "shadow_savings": {
         "default": "mdi:cash-check"
       },
+      "battery_energy_cost": {
+        "default": "mdi:battery-heart-variant"
+      },
       "ev_energy_needed": {
         "default": "mdi:car-electric"
       },
@@ -27,6 +30,12 @@
       },
       "last_full_charge": {
         "default": "mdi:battery-check"
+      },
+      "self_sufficiency": {
+        "default": "mdi:home-percent"
+      },
+      "battery_cycles": {
+        "default": "mdi:battery-sync"
       }
     },
     "binary_sensor": {
@@ -41,6 +50,9 @@
       },
       "full_charge_due": {
         "default": "mdi:battery-alert-variant"
+      },
+      "alert_charge": {
+        "default": "mdi:weather-lightning"
       }
     },
     "select": {

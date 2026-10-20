@@ -30,10 +30,12 @@ _REGISTERED = f"{DOMAIN}_frontend_registered"
 _KEYS = [
     ("sensor", "proposed_plan"), ("sensor", "active_slot"), ("sensor", "next_change"),
     ("sensor", "expected_savings"), ("sensor", "shadow_savings"), ("sensor", "last_full_charge"),
+    ("sensor", "battery_energy_cost"), ("sensor", "self_sufficiency"), ("sensor", "battery_cycles"),
     ("sensor", "ev_energy_needed"), ("sensor", "load_forecast"), ("sensor", "pv_forecast_corrected"),
     ("select", "strategy"), ("switch", "auto_mode"), ("switch", "shadow_mode"),
     ("switch", "grid_arbitrage"), ("binary_sensor", "fallback_active"),
     ("binary_sensor", "full_charge_due"), ("binary_sensor", "grid_outage"),
+    ("binary_sensor", "alert_charge"),
     ("binary_sensor", "sell_now"),
 ]
 

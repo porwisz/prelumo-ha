@@ -141,8 +141,16 @@ function decisionsView(E, I) {
           tile(E.auto_mode, "Sterowanie"), tile(E.shadow_mode, "Tryb cienia"),
           tile(E.grid_arbitrage, "Arbitraż"), tile(E.fallback_active, "Plan awaryjny"),
           tile(E.expected_savings, "Oszczędność"), tile(E.shadow_savings, "Suma w cieniu"),
+          tile(E.battery_energy_cost, "Koszt energii w baterii"),
+          tile(E.self_sufficiency, "Autarkia 30 dni"), tile(E.battery_cycles, "Cykle baterii"),
+          { type: "markdown", grid_options: { columns: 6 }, content:
+            `{%- set c = state_attr('${E.battery_energy_cost}','break_even_sell_price') %}` +
+            `{%- if c %}Sprzedaż opłacalna od **{{ '%.3f'|format(c) }} zł/kWh**` +
+            `{%- if state_attr('${E.battery_energy_cost}','estimated') %} _(szacunek)_{% endif %}` +
+            `{%- else %}Bateria pusta{%- endif %}` },
           tile(E.last_full_charge, "Ostatnie 100%"), tile(E.full_charge_due, "100% należne"),
-          tile(E.grid_outage, "Awaria sieci"), tile(E.next_change, "Następna zmiana"),
+          tile(E.grid_outage, "Awaria sieci"), tile(E.alert_charge, "Ładowanie awaryjne"),
+          tile(E.next_change, "Następna zmiana"),
         ],
       },
       { type: "grid", column_span: 2, cards: [md(decisions)] },

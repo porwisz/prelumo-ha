@@ -70,6 +70,9 @@ class BatteryParams:
     reserve_margin: float = 0.3
     # With arbitrage on: grid-charged energy is sold only if it earns at least this per kWh
     arbitrage_min_margin: float = 0.0
+    # Sell price from which battery-first stops holding energy back: at this price selling beats
+    # saving the expensive purchase, so the hour may export down to ``min_sell_soc``. None = off.
+    force_sell_above: float | None = None
     # BMS charge taper: (from SoC %, max battery-side kW) - the last % charge slowly (measured
     # on the Deye: 99 -> 100 % takes ~30 min)
     charge_taper: tuple[tuple[int, float], ...] = ((90, 5.5), (95, 3.0), (98, 1.5), (99, 0.5))
@@ -172,6 +175,11 @@ def hold_cost(soc: float, p: BatteryParams) -> float:
         HOLD_COST * max(0.0, soc - p.min_soc) + HIGH_SOC_HOLD_COST * max(0.0, soc - HIGH_SOC))
 
 
+def force_sell(h: HourInput, p: BatteryParams) -> bool:
+    """Is the sell price high enough to sell instead of holding the energy for the house?"""
+    return p.force_sell_above is not None and h.sell >= p.force_sell_above - 1e-9
+
+
 def expensive_reserve(hours: list[HourInput], p: BatteryParams) -> list[float]:
     """Battery-side kWh to keep while selling in each hour for the house in the expensive hours.
 
@@ -185,7 +193,14 @@ def expensive_reserve(hours: list[HourInput], p: BatteryParams) -> list[float]:
     acc = 0.0
     for t in range(len(hours) - 1, -1, -1):
         h = hours[t]
-        if h.buy > p.battery_first_above + 1e-9:
+        if force_sell(h, p):
+            # this hour may monetise the whole reserve: at this price the sale beats saving the
+            # expensive purchases it was kept for (``min_sell_soc`` still protects the battery).
+            # Earlier hours keep reserving for the later expensive hours - they are not at a spike.
+            out[t] = 0.0
+            if h.buy <= p.battery_first_above + 1e-9:
+                acc = 0.0
+        elif h.buy > p.battery_first_above + 1e-9:
             acc += max(0.0, h.load - h.pv * p.pv_trust)  # house + heat pump, without the EV
             out[t] = acc * (1 + p.reserve_margin) / p.eta
         else:
@@ -255,7 +270,8 @@ def _transition(
     if p.battery_first_above is not None and h.buy > p.battery_first_above + 1e-9:
         if bus > 0 and s0 > p.min_soc and base_deficit > EPS:
             return None  # charging while the house would buy at this price
-        if bus <= 0:
+        # at a high enough sell price the battery exports instead of covering the house
+        if bus <= 0 and not force_sell(h, p):
             need = min(base_deficit if ev_blocked else deficit, p.max_discharge_kw * p.eta)
             step_kwh = max(1, p.soc_step) / 100 * p.capacity_kwh * p.eta
             # SoC-grid rounding either way: a shortfall below one step is bought (the inverter

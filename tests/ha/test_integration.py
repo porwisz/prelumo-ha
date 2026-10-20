@@ -266,3 +266,52 @@ async def test_models_relearned_after_restart_same_day(hass: HomeAssistant, setu
     assert coord._models_ready
     await coord.async_replan()
     coord._learn.assert_awaited_once()  # not again the same day
+
+
+async def test_export_blocked_at_a_low_sell_price(hass: HomeAssistant, setup) -> None:
+    """A sell slot does not get Export First while this hour's RCE price is at or below the
+    block threshold - checked live, so it also holds for a plan written an hour ago."""
+    from unittest.mock import patch
+    from homeassistant.util import dt as dt_util
+    entry, _ = setup
+    coord = entry.runtime_data
+    t = dt_util.now().replace(hour=19, minute=30)
+    with patch("custom_components.prelumo.coordinator.dt_util.now", return_value=t):
+        await coord.async_refresh()
+    assert coord.data.desired_mode == "Export First"
+    assert coord.data.export_blocked is False
+    with patch.object(coord, "block_export_price", return_value=9.99), \
+            patch("custom_components.prelumo.coordinator.dt_util.now", return_value=t):
+        await coord.async_refresh()
+    assert coord.data.export_blocked is True
+    assert coord.data.desired_mode == "Zero Export To CT"
+    assert coord.data.sell_now is False
+
+
+async def test_weather_alert_charges_to_full_ignoring_the_price_cap(hass: HomeAssistant, setup) -> None:
+    """A weather warning lifts the everyday charge limit, the price cap and battery-first:
+    keeping the lights on beats the price."""
+    entry, _ = setup
+    coord = entry.runtime_data
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, "alert_entity": "binary_sensor.storm_alert"})
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    hass.states.async_set("binary_sensor.storm_alert", "off")
+    await coord.async_refresh()
+    assert coord.alert_charge() is None
+    p = coord.battery_params()
+    assert p.max_grid_charge_price is not None  # price cap in force
+    assert p.battery_first_above is not None
+
+    hass.states.async_set("binary_sensor.storm_alert", "on")
+    await coord.async_replan()
+    assert coord.alert_on is True
+    alert = coord.alert_charge()
+    assert alert is not None and alert.reason == "weather_alert" and alert.soc == 100
+    p = coord.battery_params()
+    assert p.max_soc == 100
+    assert p.require_full is True
+    assert p.max_grid_charge_price is None  # charge at any price
+    assert p.battery_first_above is None
+    assert hass.states.get("binary_sensor.prelumo_alert_charge").state == "on"

@@ -9,7 +9,7 @@ from typing import Any
 from homeassistant.components.sensor import (
     SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass,
 )
-from homeassistant.const import UnitOfEnergy
+from homeassistant.const import PERCENTAGE, UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -38,7 +38,8 @@ def _plan_attrs(c: PrelumoCoordinator) -> dict[str, Any] | None:
         return None
     return {"slot": (d.active_index or 0) + 1, "slots": d.current_plan.as_list(),
             "soc": d.current_plan.slots[d.active_index or 0].soc,
-            "desired_mode": d.desired_mode, "mode_action": d.mode_action}
+            "desired_mode": d.desired_mode, "mode_action": d.mode_action,
+            "export_blocked": d.export_blocked}
 
 
 def _proposed(c: PrelumoCoordinator) -> str | None:
@@ -65,6 +66,8 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "reserve_margin": int(c.opt["reserve_margin"]),
         "pv_trust": int(c.opt.get("pv_trust", 50)),
         "arbitrage_min_margin": float(c.opt.get("arbitrage_min_margin", 0.5)),
+        "force_sell_price": c.force_sell_price(),
+        "block_export_price": c.block_export_price(),
         "grid_energy_in_battery": c.grid_energy,
         "shadow_mode": c.shadow,
         "slots": ps.proposed.as_list() if ps.proposed else None,
@@ -88,6 +91,26 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "stale_sources": ps.stale_sources,
         "error": ps.error,
     }
+
+
+def _stock_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
+    s = c.stock
+    wear = float(c.opt["wear_cost"])
+    delivered = s.cost_per_delivered_kwh(c.eta, wear)
+    return {
+        "stock_kwh": round(s.kwh, 2),
+        "stock_value_pln": round(s.value_pln, 2),
+        # below this RCE price selling what is in the battery loses money
+        "break_even_sell_price": round(delivered, 3) if delivered is not None else None,
+        "grid_share": round(s.grid_share, 2) if s.grid_share is not None else None,
+        "wear_cost": wear,
+        "estimated": s.estimated,
+        "last_reset": s.last_reset,
+    }
+
+
+def _months(c: PrelumoCoordinator) -> dict[str, Any]:
+    return c.ledger.by_month(float(c.opt["capacity_kwh"]))
 
 
 def _series(c: PrelumoCoordinator, values: list[float]) -> dict[str, Any]:
@@ -121,6 +144,34 @@ SENSORS: tuple[PrelumoSensorDescription, ...] = (
         state_class=SensorStateClass.TOTAL,
         value=lambda c: c.ledger.total_expected_savings(),
         attrs=lambda c: {"days": c.ledger.days},
+    ),
+    PrelumoSensorDescription(
+        key="self_sufficiency", native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=1, state_class=SensorStateClass.MEASUREMENT,
+        value=lambda c: c.ledger.self_sufficiency(30),
+        attrs=lambda c: {
+            "yesterday": c.ledger.self_sufficiency(1),
+            "last_7_days": c.ledger.self_sufficiency(7),
+            "days_counted": len(c.ledger.days),
+            "by_month": _months(c),
+        },
+    ),
+    PrelumoSensorDescription(
+        key="battery_cycles", suggested_display_precision=1, state_class=SensorStateClass.TOTAL,
+        value=lambda c: c.battery_cycles_total(),
+        attrs=lambda c: {
+            "last_30_days": c.ledger.cycles(float(c.opt["capacity_kwh"]), 30),
+            "last_7_days": c.ledger.cycles(float(c.opt["capacity_kwh"]), 7),
+            "capacity_kwh": float(c.opt["capacity_kwh"]),
+            "total_discharged_kwh": c.battery_discharged_total(),
+            "by_month": _months(c),
+        },
+    ),
+    PrelumoSensorDescription(
+        key="battery_energy_cost", native_unit_of_measurement="PLN/kWh",
+        suggested_display_precision=3, state_class=SensorStateClass.MEASUREMENT,
+        value=lambda c: round(c.stock.avg, 3) if c.stock.avg is not None else None,
+        attrs=_stock_attrs,
     ),
     PrelumoSensorDescription(
         key="last_full_charge", device_class=SensorDeviceClass.TIMESTAMP,

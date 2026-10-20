@@ -8,7 +8,7 @@ from typing import Any
 
 from homeassistant.components.recorder import get_instance, history
 from homeassistant.components.recorder.statistics import statistics_during_period
-from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, State
 from homeassistant.util import dt as dt_util
 
@@ -85,6 +85,18 @@ class InverterEntities:
     @property
     def battery_power(self) -> str:
         return self.s("bateria_moc")  # W, negative = charging
+
+    @property
+    def battery_charge_total(self) -> str:
+        return self.s("suma_bateria_ladowanie")  # kWh, monotonic
+
+    @property
+    def battery_discharge_total(self) -> str:
+        return self.s("suma_bateria_rozladowanie")  # kWh, monotonic
+
+    @property
+    def pv_total(self) -> str:
+        return self.s("suma_pv")  # kWh, monotonic
 
     @property
     def house_total(self) -> str:
@@ -191,6 +203,19 @@ async def read_calendar(
                 target = float(tok)
         out.append((dt, target))
     return out
+
+
+def alert_active(hass: HomeAssistant, entity_id: str | None) -> bool:
+    """Is a weather warning on? (MeteoAlarm binary sensor, or IMGW's warning-count sensor.)"""
+    st = hass.states.get(entity_id) if entity_id else None
+    if st is None or st.state in BAD:
+        return False
+    if st.state in (STATE_ON, STATE_OFF):
+        return st.state == STATE_ON
+    try:  # a count of active warnings
+        return float(st.state) > 0
+    except ValueError:
+        return st.state.lower() not in ("none", "brak", "no_alert", "")
 
 
 def read_manual_target(

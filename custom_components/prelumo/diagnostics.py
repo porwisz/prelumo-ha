@@ -68,6 +68,17 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Prelumo
             "due": c.full_charge_due(),
             "max_soc_used": c.battery_params().max_soc,
         },
+        "battery_stock": {
+            **c.stock.to_dict(),
+            "avg": c.stock.avg,
+            "break_even_sell_price": c.stock.cost_per_delivered_kwh(c.eta, float(c.opt["wear_cost"])),
+        },
         "shadow_ledger": c.ledger.to_dict(),
+        "statistics": {
+            "self_sufficiency_30d": c.ledger.self_sufficiency(30),
+            "cycles_30d": c.ledger.cycles(float(c.opt["capacity_kwh"]), 30),
+            "cycles_total": c.battery_cycles_total(),
+            "by_month": c.ledger.by_month(float(c.opt["capacity_kwh"])),
+        },
         "write_history": [t.isoformat() for t in c.guard.history],
     }

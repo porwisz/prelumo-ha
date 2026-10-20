@@ -641,3 +641,51 @@ def test_pv_trust_charges_overnight_for_a_morning_the_forecast_says_is_sunny():
     full = optimize(hrs, 22, BatteryParams(**{**base, "pv_trust": 1.0}), Strategy.SELF_CONSUMPTION)
     assert trust.hours[5].soc_end > full.hours[5].soc_end + 10  # charged before 06:00
     assert any(h.mode is HourMode.GRID_CHARGE for h in trust.hours[:6])
+
+
+def test_force_sell_price_lifts_the_house_reserve():
+    """Above the forced-sell price the battery exports past the reserve: at 2.60 zl/kWh the sale
+    beats saving a 1.50 zl purchase, so the house buys from the grid instead.
+    """
+    from dataclasses import replace
+    buy = [0.63, 1.5, 1.5, 1.5, 0.63, 0.63]
+    sell = [0.6, 1.53, 2.60, 1.41, 0.9, 0.8]  # spike at 19:00
+    load = [0.5, 0.5, 0.5, 8.0, 0.5, 0.5]  # heat pump at 20:00 needs the reserve
+    hrs = day(buy, sell, load=load)
+    p = replace(P, max_soc=98, min_sell_soc=20, max_grid_charge_price=0.63,
+                battery_first_above=0.63, reserve_margin=0.3)
+    held = optimize(hrs, 90, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
+    forced = optimize(hrs, 90, replace(p, force_sell_above=2.0), Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert forced.hours[2].battery_export > held.hours[2].battery_export + 1
+    assert forced.hours[2].soc_end < held.hours[2].soc_end  # sells deeper into the reserve
+    assert forced.hours[3].grid_import > 1  # the house then buys at the expensive price
+    assert held.hours[3].grid_import < 1  # without it the battery still covers the house
+
+
+def test_without_force_sell_a_price_spike_does_not_break_the_reserve():
+    from dataclasses import replace
+    from core.optimizer import expensive_reserve
+    buy = [0.63, 1.5, 1.5, 1.5, 0.63, 0.63]
+    sell = [0.6, 1.53, 9.99, 1.41, 0.9, 0.8]
+    load = [0.5, 0.5, 0.5, 8.0, 0.5, 0.5]
+    hrs = day(buy, sell, load=load)
+    p = replace(P, max_soc=98, min_sell_soc=20, max_grid_charge_price=0.63,
+                battery_first_above=0.63, reserve_margin=0.3)
+    assert p.force_sell_above is None  # off by default
+    res = expensive_reserve(hrs, p)
+    assert res[1] > res[2] > 8.0  # 18:00 also holds back for 19:00 and 20:00
+    r = optimize(hrs, 90, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert r.hours[3].grid_import < 1
+    freed = expensive_reserve(hrs, replace(p, force_sell_above=2.0))
+    assert freed[2] == 0.0  # the spike hour may monetise the reserve
+    # earlier hours still reserve for 20:00 - they are not at a spike - but no longer for the
+    # spike hour's own load, which will run on the grid
+    assert 8.0 < freed[1] < res[1]
+
+
+def test_force_sell_never_goes_below_min_sell_soc():
+    from dataclasses import replace
+    hrs = day([1.5] * 4, [9.99] * 4, load=[0.5] * 4)
+    p = replace(P, min_sell_soc=30, battery_first_above=0.63, force_sell_above=1.0)
+    r = optimize(hrs, 90, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
+    assert min(h.soc_end for h in r.hours) >= 30

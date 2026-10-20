@@ -91,3 +91,21 @@ def test_shadow_ledger_ignores_penalty_costs():
     old = ShadowLedger.from_dict({"days": {"2026-10-13": {"plan_cost": 80009.9, "baseline_cost": 10.9,
                                                           "expected_savings": -79999.0, "actual_cost": -10.5}}})
     assert old.total_expected_savings() == 0.0 and old.days["2026-10-13"] == {"actual_cost": -10.5}
+
+
+def test_full_charge_deadline_limits_the_window():
+    """A charge for a coming power cut must land before the cut, not anywhere in the window."""
+    from core.optimizer import BatteryParams, HourInput, HourMode, Strategy, optimize
+    hrs = [HourInput(datetime(2026, 1, 5, 0) + timedelta(hours=i), 0.0, 0.5, 0.0,
+                     1.5 if i < 3 else 0.3, 0.2) for i in range(12)]
+    p = BatteryParams(capacity_kwh=10, min_soc=10, max_soc=100, max_charge_kw=10,
+                      max_discharge_kw=10, soc_step=10, require_full=True,
+                      charge_taper=((100, 10.0),))
+    # without a deadline the cheap hours later are used
+    late = optimize(hrs, 20, p, Strategy.SELF_CONSUMPTION, full_by=12)
+    assert max(h.soc_end for h in late.hours[:3]) < 100
+    # with a 3 h deadline it charges at once, expensive hours and all
+    soon = optimize(hrs, 20, p, Strategy.SELF_CONSUMPTION, full_by=3)
+    assert max(h.soc_end for h in soon.hours[:3]) == 100
+    assert "full_charge_planned" in soon.notes
+    assert any(h.mode is HourMode.GRID_CHARGE for h in soon.hours[:3])

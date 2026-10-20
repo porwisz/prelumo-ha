@@ -33,6 +33,8 @@ CONF_EV_POWER: Final = "ev_power"
 CONF_EV_CALENDAR: Final = "ev_calendar"
 CONF_EV_MANUAL_SOC: Final = "ev_manual_soc"
 CONF_EV_MANUAL_READY: Final = "ev_manual_ready"
+CONF_ALERT_ENTITY: Final = "alert_entity"
+CONF_OUTAGE_CALENDAR: Final = "outage_calendar"
 CONF_OUTAGE_ENTITY: Final = "outage_entity"
 CONF_OUTAGE_THRESHOLD: Final = "outage_threshold"
 
@@ -93,6 +95,10 @@ OPT_BATTERY_FIRST: Final = "battery_first_in_expensive_hours"
 OPT_RESERVE_MARGIN: Final = "reserve_margin"
 OPT_ARBITRAGE_MARGIN: Final = "arbitrage_min_margin"
 OPT_SLOT_WINDOW: Final = "slot_window_hours"
+OPT_FORCE_SELL_PRICE: Final = "force_sell_price"
+OPT_BLOCK_EXPORT_PRICE: Final = "block_export_price"
+OPT_ALERT_SOC: Final = "alert_soc"
+OPT_ALERT_LEAD: Final = "alert_lead_hours"
 
 OPTION_DEFAULTS: Final = {
     OPT_CAPACITY: 20.0,
@@ -132,6 +138,10 @@ OPTION_DEFAULTS: Final = {
     OPT_ARBITRAGE_MARGIN: 0.5,  # PLN/kWh, min. profit to sell energy bought from the grid
     OPT_RESERVE_MARGIN: 30,  # %, extra on top of the forecast house need in expensive hours
     OPT_SLOT_WINDOW: 18,  # h; slots are built from the next N hours, the optimiser still sees the horizon
+    OPT_FORCE_SELL_PRICE: 0.0,  # PLN/kWh; above this RCE price sell even past the house reserve (0 = off)
+    OPT_BLOCK_EXPORT_PRICE: 0.0,  # PLN/kWh; at or below this RCE price never Export First
+    OPT_ALERT_SOC: 100,  # % to charge to on a weather alert / before a planned outage (0 = off)
+    OPT_ALERT_LEAD: 2,  # h before a planned outage the battery should already be charged
 }
 
 # --- runtime switches / select (restored state) ------------------------

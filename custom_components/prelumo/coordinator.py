@@ -19,16 +19,17 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_EV_CALENDAR, CONF_EV_LIMIT, CONF_EV_MANUAL_READY, CONF_EV_MANUAL_SOC, CONF_EV_PLUGGED,
+    CONF_ALERT_ENTITY, CONF_EV_CALENDAR, CONF_EV_LIMIT, CONF_EV_MANUAL_READY, CONF_EV_MANUAL_SOC, CONF_EV_PLUGGED,
     CONF_EV_POWER, CONF_EV_SOC, CONF_HP_POWER, CONF_INVERTER_PREFIX, CONF_MODE_EXPORT_FIRST,
-    CONF_MODE_SELECT, CONF_MODE_ZERO_EXPORT, CONF_OUTAGE_ENTITY, CONF_OUTAGE_THRESHOLD,
+    CONF_MODE_SELECT, CONF_MODE_ZERO_EXPORT, CONF_OUTAGE_CALENDAR, CONF_OUTAGE_ENTITY,
+    CONF_OUTAGE_THRESHOLD,
     CONF_RCE_TODAY, CONF_RCE_TOMORROW, CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW, CONF_WEATHER,
     CONF_WRITE_ACTION, DEFAULTS, DOMAIN, ISSUE_STALE_DATA, ISSUE_WRITE_FAILED, OPT_AFTERNOON_SUMMER,
     OPT_AFTERNOON_WINTER, OPT_CAPACITY, OPT_EFFICIENCY, OPT_EV_CAPACITY, OPT_EV_CHARGER_KW,
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_ARBITRAGE_MARGIN, OPT_BATTERY_FIRST, OPT_RESERVE_MARGIN, OPT_SLOT_WINDOW, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_PV_TRUST, OPT_SELL_MIN_POWER, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
+    OPT_ALERT_LEAD, OPT_ALERT_SOC, OPT_ARBITRAGE_MARGIN, OPT_BATTERY_FIRST, OPT_BLOCK_EXPORT_PRICE, OPT_FORCE_SELL_PRICE, OPT_RESERVE_MARGIN, OPT_SLOT_WINDOW, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_PV_TRUST, OPT_SELL_MIN_POWER, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
     STORAGE_VERSION, UPDATE_INTERVAL,
 )
 from .core.balance import FULL_SOC, FullChargeTracker
@@ -41,6 +42,7 @@ from .core.optimizer import BatteryParams, Strategy
 from .core.plan import SLOT_COUNT, DayPlan, PlanError, Slot, SlotMode, same_behaviour
 from .core.planner import PlannerInputs, PlannerResult, horizon_hours, parse_fallback_plan, run_planner
 from .core.shadow import ShadowLedger, energy_cost
+from .core.stock import MAX_TICK_KWH, BatteryStock, account_tick
 from .core.taper import charge_events, merge_events, taper_from_events
 from .core.tariff import G13Tariff
 from .ha_io import inputs as io
@@ -60,8 +62,18 @@ class PrelumoData:
     sell_now: bool = False
     outage: bool = False
     soc: float | None = None
+    export_blocked: bool = False  # sell price at or below the block threshold right now
     desired_mode: str | None = None  # work mode Prelumo wants (also computed in shadow mode)
     mode_action: str | None = None  # what happened: set / unchanged / shadow / auto_off / outage
+
+
+@dataclass(frozen=True)
+class AlertCharge:
+    """Charge to be full before a coming power cut."""
+
+    soc: int
+    by_hours: int | None  # deadline in hours from now; None = as soon as possible
+    reason: str  # weather_alert | planned_outage
 
 
 @dataclass
@@ -113,6 +125,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.strategy = Strategy.SELF_CONSUMPTION
         self.arbitrage = False
         self.grid_energy: bool | None = None  # battery holds energy bought from the grid
+        self.alert_on = False  # weather warning now active
+        self.planned_outage: datetime | None = None  # start of the next announced outage
         self.ev_power_seen: float | None = None  # kW, last measured EV charging power
         self.shadow = True
         self.auto_mode = True
@@ -120,6 +134,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.pv_bias = PvBias()
         self.ev_pattern = EvPattern()
         self.ledger = ShadowLedger()
+        self.stock = BatteryStock()  # what the energy now in the battery cost
+        self._counters: dict[str, float] = {}  # last inverter energy counters (kWh)
         self.load_profile = LoadProfile()
         self.hp_model = HeatPumpModel()
         self.last_learn: str | None = None
@@ -153,27 +169,58 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         hours around the due time are used, not only the ones after it."""
         return self.full.due(dt_util.now() + timedelta(hours=int(self.opt[OPT_SLOT_WINDOW])))
 
+    def alert_charge(self) -> AlertCharge | None:
+        """Charge to be full for a coming power cut: weather warning or a planned outage.
+
+        Different from the periodic BMS balancing: here keeping the lights on beats the price,
+        so the price cap and battery-first are lifted and the deadline is the event, not the
+        slot window.
+        """
+        soc = int(self.opt[OPT_ALERT_SOC])
+        if soc <= 0:
+            return None
+        if self.alert_on:
+            return AlertCharge(soc, None, "weather_alert")
+        if self.planned_outage is not None:
+            lead = timedelta(hours=float(self.opt[OPT_ALERT_LEAD]))
+            by = max(0, int((self.planned_outage - lead - dt_util.now()).total_seconds() // 3600))
+            return AlertCharge(soc, by, "planned_outage")
+        return None
+
     def battery_params(self) -> BatteryParams:
         o = self.opt
-        due = self.full_charge_planned()
+        alert = self.alert_charge()
+        due = self.full_charge_planned() or alert is not None
         # everyday limit (last % charge slowly); full charge only when the periodic one is due
         max_soc = int(o[OPT_MAX_SOC]) if due else min(int(o[OPT_MAX_SOC]), int(o[OPT_MAX_CHARGE_SOC]))
+        if alert is not None:
+            max_soc = min(int(o[OPT_MAX_SOC]), alert.soc)
         return BatteryParams(
             capacity_kwh=float(o[OPT_CAPACITY]), min_soc=int(o[OPT_MIN_SOC]), max_soc=max_soc,
             require_full=due,
-            battery_first_above=self.max_grid_charge_price() if o[OPT_BATTERY_FIRST] else None,
+            battery_first_above=None if alert else (
+                self.max_grid_charge_price() if o[OPT_BATTERY_FIRST] else None),
             reserve_margin=float(o[OPT_RESERVE_MARGIN]) / 100,
             arbitrage_min_margin=float(o.get(OPT_ARBITRAGE_MARGIN, 0.5)),
             max_charge_kw=float(o[OPT_MAX_CHARGE]), max_discharge_kw=float(o[OPT_MAX_DISCHARGE]),
             roundtrip_efficiency=float(o[OPT_EFFICIENCY]), wear_cost=float(o[OPT_WEAR]),
             grid_import_kw=float(o[OPT_GRID_IMPORT]), grid_export_kw=self.grid_export_kw(),
             soc_step=int(o[OPT_SOC_STEP]),
-            max_grid_charge_price=self.max_grid_charge_price(),
+            max_grid_charge_price=None if alert else self.max_grid_charge_price(),
             min_sell_soc=int(o[OPT_MIN_SELL_SOC]),
             charge_taper=self.charge_taper(),
             sell_min_power_kw=float(o.get(OPT_SELL_MIN_POWER, 6.0)),
             pv_trust=float(o.get(OPT_PV_TRUST, 50)) / 100,
+            force_sell_above=self.force_sell_price(),
         )
+
+    def force_sell_price(self) -> float | None:
+        """Sell price from which the battery sells past the house reserve (None = off)."""
+        v = float(self.opt.get(OPT_FORCE_SELL_PRICE, 0.0))
+        return v if v > 0 else None
+
+    def block_export_price(self) -> float:
+        return float(self.opt.get(OPT_BLOCK_EXPORT_PRICE, 0.0))
 
     def grid_export_kw(self) -> float:
         """Option value, capped by the inverter's own max sell power setting when available."""
@@ -230,6 +277,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.pv_bias = PvBias.from_dict(stored.get("pv_bias"))
         self.ev_pattern = EvPattern.from_dict(stored.get("ev_pattern"))
         self.ledger = ShadowLedger.from_dict(stored.get("shadow"))
+        self.stock = BatteryStock.from_dict(stored.get("stock"))
         self.last_learn = stored.get("last_learn")
         self.grid_energy = stored.get("grid_energy")
         self.ev_power_seen = stored.get("ev_power_seen")
@@ -271,6 +319,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 "pv_bias": self.pv_bias.to_dict(),
                 "ev_pattern": self.ev_pattern.to_dict(),
                 "shadow": self.ledger.to_dict(),
+                "stock": self.stock.to_dict(),
                 "last_learn": self.last_learn,
                 "writes": [t.isoformat() for t in self.guard.history],
                 "last_full": self.full.last_full.isoformat() if self.full.last_full else None,
@@ -298,13 +347,22 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 self.config_entry.async_create_background_task(
                     self.hass, self.async_replan(), f"{DOMAIN}_after_full_charge"
                 )
+        if io.alert_active(self.hass, self.conf.get(CONF_ALERT_ENTITY)) != self.alert_on:
+            # a warning appeared or ended: plan at once, do not wait for the hour
+            self.config_entry.async_create_background_task(
+                self.hass, self.async_replan(), f"{DOMAIN}_alert_changed"
+            )
         self._maybe_recover(now)
         self._track_grid_energy(plan, now, data.soc)
+        self._track_stock(now, data.soc)
         if plan is not None:
             data.active_index = plan.active_index(now)
             data.next_change, _ = plan.next_change(now)
-            data.sell_now = plan.slots[data.active_index].mode.value == "sell"
-            data.desired_mode = self.writer.desired_mode(self._mode_plan(plan, now), now)
+            data.export_blocked = self._export_blocked(now)
+            data.sell_now = plan.slots[data.active_index].mode.value == "sell" and not data.export_blocked
+            data.desired_mode = self.writer.desired_mode(
+                self._mode_plan(plan, now), now, may_export=not data.export_blocked
+            )
             if outage:
                 data.mode_action = "outage"
             elif not self.auto_mode:
@@ -346,6 +404,80 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         if new != self.grid_energy:
             self.grid_energy = new
             self._save()
+
+    @callback
+    def _export_blocked(self, now: datetime) -> bool:
+        """Never Export First while this hour's sell price is at or below the threshold.
+
+        The plan already refuses to sell without a positive price, but it can be up to
+        ``stale_hours`` old (or the price can be revised), so the work mode is checked against
+        the live price every 30 s as well. With no price for this hour, exporting is blocked.
+        """
+        price = self._sell_seen.get(now.replace(minute=0, second=0, microsecond=0))
+        return price is None or price <= self.block_export_price()
+
+    # --- average cost of the energy in the battery -------------------------
+    @property
+    def eta(self) -> float:
+        """One-way efficiency (charge or discharge)."""
+        return float(self.opt[OPT_EFFICIENCY]) ** 0.5
+
+    def battery_discharged_total(self) -> float | None:
+        """Lifetime kWh taken out of the battery, as the inverter counts it."""
+        return io.state_float(self.hass, self.inv.battery_discharge_total)
+
+    def battery_cycles_total(self) -> float | None:
+        """Full cycles since the inverter's discharge counter started."""
+        dis = self.battery_discharged_total()
+        cap = float(self.opt[OPT_CAPACITY])
+        return round(dis / cap, 2) if dis is not None and cap > 0 else None
+
+    def usable_kwh(self, soc: float) -> float:
+        """Battery-side kWh above min SoC at ``soc`` % — the energy the stock accounts for."""
+        o = self.opt
+        return max(0.0, soc - float(o[OPT_MIN_SOC])) / 100 * float(o[OPT_CAPACITY])
+
+    @callback
+    def _track_stock(self, now: datetime, soc: float | None) -> None:
+        """Book this tick's charging and discharging into ``self.stock``.
+
+        Uses the inverter's monotonic energy counters, not the power reading: a missed tick
+        then costs nothing, because the next delta covers the gap. A gap too large to price
+        (restart, unavailable sensors) is skipped and the SoC anchor at the next re-plan
+        repairs the amount.
+        """
+        if soc is not None and soc <= float(self.opt[OPT_MIN_SOC]) + 1:
+            if self.stock.kwh > 0 or self.stock.estimated:
+                self.stock.reset(now)
+                self._save()
+            return
+        names = {
+            "charge": self.inv.battery_charge_total,
+            "discharge": self.inv.battery_discharge_total,
+            "import": self.inv.grid_import_total,
+            "house": self.inv.house_total,
+            "pv": self.inv.pv_total,
+        }
+        vals = {k: io.state_float(self.hass, e) for k, e in names.items()}
+        if any(v is None for v in vals.values()):
+            return
+        prev, self._counters = self._counters, {k: float(v) for k, v in vals.items()}
+        if not prev or set(prev) != set(vals):
+            return  # first tick: only a baseline, nothing to book yet
+        d = {k: self._counters[k] - prev[k] for k in vals}
+        if any(v < 0 for v in d.values()) or d["charge"] > MAX_TICK_KWH or d["discharge"] > MAX_TICK_KWH:
+            self.stock.estimated = True  # counter reset or a gap: amount repaired by the anchor
+            return
+        if d["charge"] <= 0 and d["discharge"] <= 0:
+            return
+        eta = self.eta
+        tick = account_tick(d["charge"], d["discharge"], d["import"], d["house"], d["pv"], eta)
+        self.stock.discharge(tick.discharged)
+        price = self.tariff().price(now) / eta  # PLN per battery-side kWh (charging loss in)
+        self.stock.charge(tick.from_grid, price, from_grid=True)
+        self.stock.charge(tick.charged - tick.from_grid, 0.0)  # PV is free
+        # not saved here: the 30 s loop would write the store all the time. The stock is
+        # persisted at every re-plan, and after a crash the SoC anchor repairs the amount.
 
     @callback
     def _maybe_recover(self, now: datetime) -> None:
@@ -424,6 +556,15 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             tariff = self.tariff()
             buy = {h: tariff.price(h) for h in imp}
             self.ledger.record_actual(y0.date(), energy_cost(imp, exp, buy, self._sell_seen))
+        house = await io.hourly_energy_change(self.hass, self.inv.house_total, y0, y1)
+        pv = await io.hourly_energy_change(self.hass, self.inv.pv_total, y0, y1)
+        dis = await io.hourly_energy_change(self.hass, self.inv.battery_discharge_total, y0, y1)
+        if house or imp or dis:
+            self.ledger.record_energy(
+                y0.date(), house=sum(house.values()), pv=sum(pv.values()),
+                grid_import=sum(imp.values()), grid_export=sum(exp.values()),
+                discharged=sum(dis.values()),
+            )
         self.ledger.trim()
         self.last_learn = today
 
@@ -440,6 +581,10 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         soc = io.state_float(self.hass, self.inv.soc)
         if soc is None:
             stale.append("battery_soc")
+        else:
+            # the SoC is the truth about how much is in the battery; the counters only say
+            # where it came from. Seed price on the very first run: the cheapest tariff zone.
+            self.stock.rescale(self.usable_kwh(soc), seed_price=self.max_grid_charge_price() / self.eta)
 
         pv_raw = io.read_solcast(self.hass, [c.get(CONF_SOLCAST_TODAY), c.get(CONF_SOLCAST_TOMORROW)])
         self._today_pv_forecast = {h: v for h, v in pv_raw.items() if h.date() == now.date()} or self._today_pv_forecast
@@ -454,6 +599,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self._sell_seen = {h: v for h, v in self._sell_seen.items() if now - h < timedelta(days=3)}
         if not any(h in sell_h for h in hours[:12]):
             stale.append("sell_prices")
+
+        self.alert_on = io.alert_active(self.hass, c.get(CONF_ALERT_ENTITY))
+        self.planned_outage = await self._next_planned_outage(now, hours[-1])
 
         ps = self.plan_state
         ps.stale_sources = stale
@@ -491,8 +639,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         if outage:
             ev.battery_allowed = [True] * len(hours)
 
+        alert = self.alert_charge()
         inp = PlannerInputs(now, soc, pv, base, hp, ev, sell_h, self.tariff(), horizon, int(o[OPT_SLOT_WINDOW]),
-                            bool(self.grid_energy))
+                            bool(self.grid_energy), full_by_h=alert.by_hours if alert else None)
         params = self.battery_params()
         result = await self.hass.async_add_executor_job(
             run_planner, inp, params, self.strategy, self.arbitrage, current
@@ -501,6 +650,12 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         ps.pv, ps.load, ps.heat_pump = [pv[h] for h in hours], base, hp
         self.ledger.record_plan(now.date(), result.slot_plan_cost, result.baseline_cost)
         await self._maybe_write(current, result.plan, now, force_write, result.gain_vs_current)
+
+    async def _next_planned_outage(self, now: datetime, until: datetime) -> datetime | None:
+        """Start of the next announced outage in the horizon (any event in the outage calendar)."""
+        events = await io.read_calendar(self.hass, self.conf.get(CONF_OUTAGE_CALENDAR), now, until)
+        starts = [dt for dt, _ in events if dt >= now]
+        return min(starts) if starts else None
 
     def _ev_charger_kw(self) -> float:
         """Real charging power: the live reading while charging (remembered), else the last one

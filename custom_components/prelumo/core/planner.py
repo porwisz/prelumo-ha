@@ -28,6 +28,9 @@ class PlannerInputs:
     horizon_h: int = 36
     window_h: int = 18  # the 6 slots are built from (and judged on) this many hours
     grid_energy: bool = False  # the battery holds energy bought from the grid
+    # deadline (hours from now) for the required full charge; None = anywhere in the slot window.
+    # Set when the charge is for a coming power cut, which has a time of its own.
+    full_by_h: int | None = None
 
 
 @dataclass
@@ -132,8 +135,9 @@ def run_planner(
     hours = horizon_hours(inp.now, inp.horizon_h)
     hin, missing = build_hours(inp, hours)
     window = max(6, min(inp.window_h, 24, len(hin)))
+    full_by = window if inp.full_by_h is None else max(1, min(window, inp.full_by_h))
     opt = optimize(hin, inp.soc, params, strategy, arbitrage, grid_energy=inp.grid_energy,
-                   full_by=window)
+                   full_by=full_by)
     segs, _ = compress(opt.hours, hin, inp.soc, params, window=window, grid_energy=inp.grid_energy)
     plan = to_day_plan(segs, hin, params, current, soc_now=inp.soc)
     day = hin[:window]

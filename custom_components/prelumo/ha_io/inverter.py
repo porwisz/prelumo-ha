@@ -29,8 +29,10 @@ class InverterWriter:
         _LOGGER.info("Writing schedule: %s", plan.to_service_data())
         await self.hass.services.async_call(self.domain, self.service, plan.to_service_data(), blocking=True)
 
-    def desired_mode(self, plan: DayPlan, now) -> str:
-        return self.export_first if plan.active_slot(now).mode is SlotMode.SELL else self.zero_export
+    def desired_mode(self, plan: DayPlan, now, may_export: bool = True) -> str:
+        """Export First only in a sell slot, and only while exporting is allowed right now."""
+        sell = plan.active_slot(now).mode is SlotMode.SELL
+        return self.export_first if sell and may_export else self.zero_export
 
     def current_mode(self) -> str | None:
         st = self.hass.states.get(self.mode_select)

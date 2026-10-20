@@ -17,7 +17,7 @@ co godz.  prognozy → optymalizator godzinowy na cały horyzont (36 h, DP po So
             nowy plan tańszy od obecnego o ≥ „min. zysk” (domyślnie 0,50 zł/24 h)
             albo obecny łamie limity; maks. 6 zapisów/dobę
 raz/dobę  nauka: profil zużycia, model pompy ciepła, wzorzec Tesli, korekta Solcast,
-          rzeczywisty koszt wczoraj (tryb cienia)
+          rzeczywisty koszt wczoraj (tryb cienia), statystyki doby (autarkia, cykle baterii)
 ```
 
 | Wejście | Źródło (domyślnie) |
@@ -29,6 +29,9 @@ raz/dobę  nauka: profil zużycia, model pompy ciepła, wzorzec Tesli, korekta S
 | Pompa ciepła | `sensor.sprsun_silnik_moc` — regresja stopniogodzin + profil CWU |
 | Tesla | ESP32 BLE: SoC, limit, podłączenie, moc; kalendarz; ręczny cel |
 | Awaria sieci | `sensor.deye_falownik_siec_napiecie_l1` < 180 V |
+| Ostrzeżenia pogodowe | encja MeteoAlarm / IMGW (opcjonalnie) |
+| Zapowiedziane wyłączenia | kalendarz wyłączeń (opcjonalnie) |
+| Koszt energii w baterii | liczniki `suma_bateria_ladowanie/_rozladowanie`, `suma_siec_pobor`, `suma_dom`, `suma_pv` |
 
 Moc ładowania Tesli: z czujnika mocy (ESP32) podczas ładowania — zapamiętana na później;
 „moc ładowarki” z opcji służy tylko, dopóki nie było pomiaru.
@@ -51,6 +54,30 @@ Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo 
   kupioną z sieci (bez cyklu baterii dla taniego prądu). Prelumo śledzi, czy w baterii jest energia
   z sieci (ładowanie w slocie z sieci ustawia, zejście do min. SoC kasuje); energia z PV jest
   używana normalnie. Atrybut `grid_energy_in_battery` w `sensor.prelumo_proposed_plan`.
+### Ile kosztuje energia w baterii
+
+`sensor.prelumo_battery_energy_cost` prowadzi średnią ważoną kosztu nabycia: ładowanie z sieci
+wchodzi po cenie zakupu danej chwili (podzielonej przez sprawność ładowania), ładowanie z PV po
+0 zł, rozładowanie zdejmuje energię po bieżącej średniej. Zejście do min. SoC zeruje licznik —
+bateria jest pusta, więc to, co kupione, zostało zużyte.
+
+Źródłem są liczniki energii falownika (`suma_bateria_ladowanie/_rozladowanie`, `suma_siec_pobor`,
+`suma_dom`, `suma_pv`), nie chwilowa moc, więc przegapiony odczyt nic nie psuje. Ilość energii jest
+raz na godzinę kotwiczona do SoC; przed pierwszym zejściem do min. SoC wartość jest szacunkiem
+(atrybut `estimated`).
+
+Atrybut **`break_even_sell_price`** = średnia / sprawność rozładowania + koszt zużycia baterii —
+poniżej tej ceny RCE sprzedaż traci pieniądze.
+
+- **Cena wymuszonej sprzedaży** (domyślnie 0 = wył.) — gdy RCE przekracza ten próg, bateria
+  sprzedaje mimo rezerwy na drogie godziny; dom dokupuje wtedy z sieci, bo sprzedaż zarabia więcej.
+  Dotyczy tylko godziny piku — godziny wcześniejsze nadal trzymają rezerwę. Min. SoC przy
+  sprzedaży obowiązuje zawsze.
+- **Cena blokady eksportu** (domyślnie 0) — przy RCE ≤ tej wartości Prelumo nigdy nie ustawia
+  Export First. Plan i tak nie planuje sprzedaży bez dodatniej ceny (twarda reguła
+  `sell_without_price`), ale ten próg jest sprawdzany **na żywo co 30 s**, więc działa też wtedy,
+  gdy plan jest stary albo cena się zmieniła. Brak ceny dla danej godziny też blokuje eksport.
+  Widoczne jako atrybut `export_blocked` w `sensor.prelumo_active_slot`.
 - **Min. SoC przy sprzedaży** (domyślnie 20%) — bateria nie sprzedaje do sieci poniżej tego poziomu;
   slot Sell nigdy nie dostaje niższego progu.
 
@@ -63,6 +90,20 @@ Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo 
   (PV, tanie godziny; limit ceny obowiązuje). Monitorowanie: `sensor.prelumo_last_full_charge`
   (data ostatnich 100%, `days_since`, `next_due`, `planned`) i `binary_sensor.prelumo_full_charge_due`.
   Ostatnie 100% Prelumo odczytuje z historii SoC przy starcie i na bieżąco z falownika.
+
+### Ładowanie awaryjne (burza, zapowiedziane wyłączenie)
+
+- **Ostrzeżenia pogodowe** — encja MeteoAlarm/IMGW (`binary_sensor` lub licznik ostrzeżeń
+  w `sensor`). Gdy ostrzeżenie jest aktywne, Prelumo doładowuje baterię do **SoC ładowania
+  awaryjnego** (domyślnie 100%) **bez limitu ceny ładowania** i bez reguły „bateria najpierw" —
+  tu światło w domu jest ważniejsze niż cena. Zmiana stanu ostrzeżenia wymusza przeliczenie
+  natychmiast, nie czeka na pełną godzinę.
+- **Zapowiedziane wyłączenia** — kalendarz z wydarzeniami wyłączeń. Początek najbliższego
+  wydarzenia minus **wyprzedzenie** (domyślnie 2 h) jest terminem, do którego bateria musi być
+  naładowana; optymalizator wybiera do tego najtańsze godziny przed terminem.
+- To osobna ścieżka niż rutynowe **pełne ładowanie co N dni** (balansowanie BMS) — tam limit ceny
+  obowiązuje. Status: `binary_sensor.prelumo_alert_charge` (atrybuty `reason`, `target_soc`,
+  `hours_left`, `planned_outage`).
 
 ### Strategie
 - **Autokonsumpcja** — bateria nigdy nie oddaje do sieci; może ładować się z sieci w strefie
@@ -83,8 +124,11 @@ Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo 
 | `sensor.prelumo_proposed_plan` | plan Prelumo: sloty, plan godzinowy, koszt, decyzja zapisu |
 | `sensor.prelumo_expected_savings` | oszczędność 24 h vs zwykła autokonsumpcja |
 | `sensor.prelumo_shadow_savings` | suma oszczędności z trybu cienia (+ koszt rzeczywisty per dzień) |
+| `sensor.prelumo_self_sufficiency` | autarkia 30 dni (%); atrybuty: `yesterday`, `last_7_days`, `by_month` |
+| `sensor.prelumo_battery_cycles` | cykle baterii (licznik falownika / pojemność); atrybuty: `last_30_days`, `by_month` |
+| `sensor.prelumo_battery_energy_cost` | średni koszt energii w baterii (zł/kWh); atrybuty: `break_even_sell_price`, `stock_kwh`, `grid_share` |
 | `sensor.prelumo_ev_energy_needed`, `_load_forecast`, `_pv_forecast_corrected` | prognozy |
-| `binary_sensor.prelumo_sell_now`, `_grid_outage`, `_fallback_active` | |
+| `binary_sensor.prelumo_sell_now`, `_grid_outage`, `_fallback_active`, `_alert_charge` | |
 | `select.prelumo_strategy` | autokonsumpcja / maks. handel |
 | `switch.prelumo_auto_mode` | zgoda na sterowanie (tryb pracy i zapisy) |
 | `switch.prelumo_shadow_mode` | **domyślnie włączony** — próba na sucho: liczy plan i tryb pracy, niczego nie zmienia w falowniku |

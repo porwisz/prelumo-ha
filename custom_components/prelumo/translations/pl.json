@@ -25,7 +25,9 @@
           "weather": "Pogoda (prognoza temperatury)",
           "heat_pump_power": "Moc pompy ciepła",
           "outage_entity": "Wskaźnik awarii sieci (napięcie lub binary sensor)",
-          "outage_threshold": "Awaria poniżej napięcia"
+          "outage_threshold": "Awaria poniżej napięcia",
+          "alert_entity": "Ostrzeżenia pogodowe (MeteoAlarm / IMGW)",
+          "outage_calendar": "Kalendarz zapowiedzianych wyłączeń"
         }
       },
       "ev": {
@@ -63,7 +65,9 @@
           "ev_manual_soc": "Ręczny cel SoC (input_number)",
           "ev_manual_ready": "Ręczny termin gotowości (input_datetime)",
           "write_action": "Akcja zapisu harmonogramu",
-          "mode_select": "Encja trybu pracy"
+          "mode_select": "Encja trybu pracy",
+          "alert_entity": "Ostrzeżenia pogodowe (MeteoAlarm / IMGW)",
+          "outage_calendar": "Kalendarz zapowiedzianych wyłączeń"
         }
       }
     },
@@ -118,7 +122,11 @@
           "pv_trust": "Zapas na błąd prognozy PV",
           "reserve_margin": "Margines rezerwy na drogie godziny",
           "arbitrage_min_margin": "Min. zysk z arbitrażu",
-          "slot_window_hours": "Okno harmonogramu"
+          "slot_window_hours": "Okno harmonogramu",
+          "force_sell_price": "Cena wymuszonej sprzedaży",
+          "block_export_price": "Cena blokady eksportu",
+          "alert_soc": "SoC ładowania awaryjnego",
+          "alert_lead_hours": "Wyprzedzenie przed wyłączeniem"
         },
         "data_description": {
           "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell",
@@ -132,7 +140,11 @@
           "pv_trust": "Przed drogimi godzinami bateria trzyma tyle, ile dom zużyje w nich, gdyby PV dało tylko ten procent prognozy (100% = pełne zaufanie do prognozy). Ładuje wcześniej, gdy to tańsze.",
           "reserve_margin": "Przy włączonej opcji „bateria najpierw”: bateria sprzedaje tylko ponad prognozowane zużycie domu i pompy ciepła w pozostałych drogich godzinach, plus ten margines.",
           "arbitrage_min_margin": "Energia kupiona z sieci jest sprzedawana tylko, gdy sprzedaż daje co najmniej tyle zł na kWh ponad cenę zakupu (po stratach i zużyciu baterii). Działa przy włączonym arbitrażu.",
-          "slot_window_hours": "Optymalizator planuje cały horyzont, ale 6 slotów falownika powstaje (i jest oceniane) tylko z najbliższych N godzin; Prelumo i tak przelicza co godzinę."
+          "slot_window_hours": "Optymalizator planuje cały horyzont, ale 6 slotów falownika powstaje (i jest oceniane) tylko z najbliższych N godzin; Prelumo i tak przelicza co godzinę.",
+          "force_sell_price": "Gdy cena RCE jest wyższa, bateria sprzedaje mimo rezerwy na drogie godziny — dom dokupuje wtedy z sieci, bo sprzedaż zarabia więcej. 0 = wyłączone.",
+          "block_export_price": "Przy cenie RCE ≤ tej wartości Prelumo nigdy nie ustawia Export First — sprawdzane na żywo co 30 s, także gdy plan jest stary. Brak ceny dla danej godziny też blokuje eksport.",
+          "alert_soc": "Do tego poziomu Prelumo doładowuje baterię przy ostrzeżeniu pogodowym i przed zapowiedzianym wyłączeniem prądu — bez limitu ceny ładowania i bez reguły „bateria najpierw”. 0 = wyłączone.",
+          "alert_lead_hours": "Ile godzin przed początkiem zapowiedzianego wyłączenia bateria ma już być naładowana."
         }
       }
     },
@@ -169,6 +181,9 @@
       "shadow_savings": {
         "name": "Oszczędność w trybie cienia"
       },
+      "battery_energy_cost": {
+        "name": "Średni koszt energii w baterii"
+      },
       "ev_energy_needed": {
         "name": "Energia potrzebna Tesli"
       },
@@ -180,6 +195,12 @@
       },
       "last_full_charge": {
         "name": "Ostatnie pełne ładowanie"
+      },
+      "self_sufficiency": {
+        "name": "Autarkia (30 dni)"
+      },
+      "battery_cycles": {
+        "name": "Cykle baterii"
       }
     },
     "binary_sensor": {
@@ -194,6 +215,9 @@
       },
       "full_charge_due": {
         "name": "Pełne ładowanie należne"
+      },
+      "alert_charge": {
+        "name": "Ładowanie awaryjne"
       }
     },
     "select": {

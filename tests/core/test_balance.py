@@ -50,3 +50,54 @@ def test_full_charge_respects_price_cap_and_reports_impossible():
     r = optimize(hrs, 20, due, Strategy.SELF_CONSUMPTION)
     assert "full_charge_not_possible_in_horizon" in r.notes
     assert all(h.grid_charge < 0.06 for h in r.hours)
+
+
+# --- daily energy ledger: cycles, self-sufficiency, monthly totals -----------
+def _ledger():
+    from datetime import date
+    from core.shadow import ShadowLedger
+    led = ShadowLedger()
+    for i, (house, pv, imp, exp, dis) in enumerate([
+        (20.0, 10.0, 12.0, 2.0, 8.0),
+        (20.0, 30.0, 4.0, 14.0, 10.0),
+    ]):
+        led.record_energy(date(2026, 3, 1 + i), house=house, pv=pv, grid_import=imp,
+                          grid_export=exp, discharged=dis)
+        led.record_actual(date(2026, 3, 1 + i), 5.0)
+        led.record_plan(date(2026, 3, 1 + i), 4.0, 6.0)
+    return led
+
+
+def test_self_sufficiency_over_the_window():
+    led = _ledger()
+    assert led.self_sufficiency(2) == 60.0  # 40 kWh house, 16 bought
+    assert led.self_sufficiency(1) == 80.0  # last day only: 20 house, 4 bought
+
+
+def test_self_sufficiency_unknown_without_data():
+    from core.shadow import ShadowLedger
+    assert ShadowLedger().self_sufficiency() is None
+
+
+def test_cycles_from_discharged_energy():
+    led = _ledger()
+    assert led.cycles(20.0, 2) == 0.9  # 18 kWh out of a 20 kWh battery
+    assert led.cycles(0.0) is None
+
+
+def test_monthly_totals():
+    led = _ledger()
+    m = led.by_month(20.0)["2026-03"]
+    assert m["house"] == 40.0 and m["grid_import"] == 16.0
+    assert m["cycles"] == 0.9
+    assert m["self_sufficiency"] == 60.0
+    assert m["actual_cost"] == 10.0
+    assert m["expected_savings"] == 4.0
+
+
+def test_energy_survives_storage_roundtrip():
+    from core.shadow import ShadowLedger
+    led = _ledger()
+    back = ShadowLedger.from_dict(led.to_dict())
+    assert back.self_sufficiency(2) == led.self_sufficiency(2)
+    assert back.cycles(20.0, 2) == led.cycles(20.0, 2)
