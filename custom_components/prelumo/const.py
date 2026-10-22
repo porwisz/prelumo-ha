@@ -81,6 +81,7 @@ OPT_AFTERNOON_WINTER: Final = "afternoon_peak_winter"
 OPT_EV_CAPACITY: Final = "ev_capacity_kwh"
 OPT_EV_CHARGER_KW: Final = "ev_charger_kw"
 OPT_EV_DEFAULT_TARGET: Final = "ev_default_target"
+OPT_EV_CHEAP_ONLY: Final = "ev_cheap_hours_only"
 OPT_HP_BASE_TEMP: Final = "hp_base_temp"
 OPT_HISTORY_WEEKS: Final = "history_weeks"
 OPT_HORIZON: Final = "horizon_hours"
@@ -123,6 +124,7 @@ OPTION_DEFAULTS: Final = {
     OPT_EV_CAPACITY: 75.0,
     OPT_EV_CHARGER_KW: 11.0,
     OPT_EV_DEFAULT_TARGET: 80,
+    OPT_EV_CHEAP_ONLY: True,  # the car's own schedule charges only in G13 off-peak hours
     OPT_HP_BASE_TEMP: 15.0,
     OPT_HISTORY_WEEKS: 6,
     OPT_HORIZON: 36,

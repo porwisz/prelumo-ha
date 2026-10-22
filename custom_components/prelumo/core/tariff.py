@@ -60,6 +60,13 @@ class G13Tariff:
             return Zone.AFTERNOON_PEAK
         return Zone.OFF_PEAK
 
+    def off_peak_by_clock(self, dt: datetime) -> bool:
+        """Off-peak by the hour alone, the same every day - what a car's own charging schedule
+        (e.g. Tesla "off-peak" hours) follows; it knows nothing of weekends or holidays."""
+        h = dt.hour
+        ap = self.afternoon_peak_summer if dt.month in self.summer_months else self.afternoon_peak_winter
+        return not (self.morning_peak[0] <= h < self.morning_peak[1] or ap[0] <= h < ap[1])
+
     def price(self, dt: datetime) -> float:
         return {
             Zone.MORNING_PEAK: self.price_morning_peak,

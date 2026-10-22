@@ -7,7 +7,7 @@ pattern. When the car is plugged in, the real SoC/limit decides the energy.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from statistics import median
@@ -88,14 +88,16 @@ def car_energy_needed(car: CarState, target_soc: float | None = None) -> float:
 
 
 def _spread(
-    hours: list[datetime], start: datetime, energy: float, kw: float, weight: float, out: list[float]
+    hours: list[datetime], start: datetime, energy: float, kw: float, weight: float, out: list[float],
+    can_charge: Callable[[datetime], bool] | None = None,
 ) -> None:
-    """Charge at full power from ``start`` until energy is delivered (car default behaviour)."""
+    """Charge at full power from ``start`` until energy is delivered (car default behaviour),
+    pausing in hours the car's own schedule does not charge in (``can_charge``)."""
     remaining = energy
     for i, h in enumerate(hours):
         if remaining <= 0:
             break
-        if h + timedelta(hours=1) <= start:
+        if h + timedelta(hours=1) <= start or (can_charge is not None and not can_charge(h)):
             continue
         frac = 1.0 if h >= start else (h + timedelta(hours=1) - start).total_seconds() / 3600
         e = min(remaining, kw * frac)
@@ -113,6 +115,7 @@ def forecast_ev(
     grid_import_kw: float = 1e9,
     base_load: list[float] | None = None,
     default_target_soc: float = 80.0,
+    can_charge: Callable[[datetime], bool] | None = None,  # the car's own schedule; None = any hour
 ) -> EvForecast:
     hourly = [0.0] * len(hours)
     needs: list[EvNeed] = []
@@ -154,14 +157,15 @@ def forecast_ev(
             day += timedelta(days=1)
 
     for n in needs:
-        _spread(hours, n.start, n.energy_kwh, car.charger_kw, n.probability, hourly)
+        _spread(hours, n.start, n.energy_kwh, car.charger_kw, n.probability, hourly, can_charge)
 
     allowed = [False] * len(hours)
     base = base_load or [0.0] * len(hours)
     for n in needs:
         if n.ready_by is None or n.source == "pattern":
             continue
-        idx = [i for i, h in enumerate(hours) if n.start <= h + timedelta(hours=1) and h < n.ready_by]
+        idx = [i for i, h in enumerate(hours) if n.start <= h + timedelta(hours=1) and h < n.ready_by
+               and (can_charge is None or can_charge(h))]
         grid_cap = sum(max(0.0, min(car.charger_kw, grid_import_kw - base[i])) for i in idx)
         if n.energy_kwh > grid_cap:  # cannot make it from grid alone -> battery may help
             for i in idx:

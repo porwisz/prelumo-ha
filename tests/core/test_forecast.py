@@ -77,3 +77,24 @@ def test_ev_pattern_learned():
     fc = forecast_ev(_hours(D0 + timedelta(weeks=5)), D0 + timedelta(weeks=5), car, pattern=pat)
     assert fc.hourly_kwh[18] == 11 and fc.hourly_kwh[19] == 9
     assert EvPattern.from_dict(pat.to_dict()).by_weekday == pat.by_weekday
+
+
+def test_ev_charges_only_in_cheap_hours_like_the_car_schedule():
+    """User setup: the Tesla schedule charges in G13 off-peak only - it stops at 16:00 (winter)
+    and goes on at 21:00 while plugged in; summer: 19:00 and 22:00."""
+    from core.tariff import G13Tariff
+    t = G13Tariff(0.9, 1.5, 0.63)
+    now = datetime(2026, 10, 22, 13, 0)  # Thursday, winter zones
+    hours = [now + timedelta(hours=i) for i in range(24)]
+    car = CarState(soc=40, limit=80, plugged=True, capacity_kwh=75, charger_kw=11)
+    f = forecast_ev(hours, now, car, can_charge=t.off_peak_by_clock)
+    by_hour = {h.hour: e for h, e in zip(hours, f.hourly_kwh)}
+    assert by_hour[13] > 10 and by_hour[15] > 10
+    assert all(by_hour[h] == 0 for h in range(16, 21))  # afternoon peak: paused
+    assert by_hour[21] > 0  # back in the evening
+    assert abs(f.total_kwh - car_energy_needed(car)) < 0.01
+    summer = datetime(2026, 6, 4, 13, 0)
+    assert t.off_peak_by_clock(summer.replace(hour=18)) and not t.off_peak_by_clock(summer.replace(hour=19))
+    assert t.off_peak_by_clock(summer.replace(hour=22))
+    # the car schedule knows no weekends: Saturday 17:00 is still "peak" for it
+    assert not t.off_peak_by_clock(datetime(2026, 10, 24, 17, 0))

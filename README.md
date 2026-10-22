@@ -57,6 +57,11 @@ Zapisy do falownika (pamięć flash) są oszczędzane:
 Moc ładowania Tesli: z czujnika mocy (ESP32) podczas ładowania — zapamiętana na później;
 „moc ładowarki” z opcji służy tylko, dopóki nie było pomiaru.
 
+„Tesla ładuje tylko w tanich godzinach” (domyślnie wł.): harmonogram w aucie ładuje tylko w tanich
+godzinach G13 wg zegara — przerywa w popołudniowym szczycie (zima 16:00, lato 19:00) i wraca
+wieczorem (21:00 / 22:00), jeśli auto jest podłączone. Prognoza rozkłada energię auta tylko na
+te godziny (bez reguły weekendów i świąt — harmonogram auta ich nie zna).
+
 Priorytet zapotrzebowania Tesli: ręczny cel > kalendarz (start wydarzenia = wyjazd,
 „90%” w tytule = cel) > auto podłączone (SoC → limit) > wyuczony wzorzec.
 Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo jest awaria sieci.
