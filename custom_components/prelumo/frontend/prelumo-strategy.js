@@ -29,18 +29,27 @@ Tryb pracy teraz: **{{ states('${I.mode_select}') }}** · Prelumo chce: **{{ sta
 🏠 bateria zasila dom do progu SoC · 🔌 ładowanie z sieci do SoC · 💰 sprzedaż do SoC · Moc = limit całej mocy baterii w slocie (w 💰 także dla domu) · Koszt = zakup − sprzedaż + zużycie baterii w godzinach slotu w oknie planu (ujemny = zarobek; – = slot poza oknem)`;
 
   const hourly = `{%- set ic = {'normal':'🏠','grid_charge':'🔌','sell':'💰'} -%}
-{%- set h = state_attr('${P}','slot_hourly') or [] -%}
 {%- set cur = state_attr('${P}','current_hourly') or [] -%}
+{%- set pro = state_attr('${P}','slot_hourly') or [] -%}
+{%- set h = cur or pro -%}
 {%- if not h -%}Brak danych.{%- else -%}
-Harmonogram z 6 slotów, tak jak wykona go falownik, w oknie **{{ state_attr('${P}','slot_window_hours') }} h**.
+{%- if cur -%}
+Harmonogram **zapisany teraz w falowniku**, tak jak go wykona, w oknie **{{ state_attr('${P}','slot_window_hours') }} h**. Kolumny „Propozycja” — co by się działo po zapisie planu Prelumo.
+{%- else -%}
+Nie udało się odczytać harmonogramu z falownika — poniżej **propozycja Prelumo**, nie to, co wykona falownik.
+{%- endif %}
 
-| Godz. | Slot | Próg | SoC | SoC teraz* | Zużycie | PV | Z baterii | Pobór | Oddanie | Zakup | RCE | Koszt |
-|:--|:-:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Godz. | Slot | Próg | SoC | Zużycie | PV | Z baterii | Pobór | Oddanie | Zakup | RCE | Koszt | Propozycja | SoC | Koszt |
+|:--|:-:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|:-:|--:|--:|
 {% for r in h -%}
 {%- set i = loop.index0 -%}
-| {{ r.start[11:16] }} | {{ ic.get(r.mode,'') }} | {{ r.floor }}% | **{{ r.soc }}%** | {{ (cur[i].soc ~ '%') if cur | count > i else '–' }} | {{ '%.1f' % (r.load + r.ev) }}{{ ' 🚗' if r.ev > 0.05 else '' }} | {{ '%.1f' % r.pv }} | {{ '%.1f' % r.battery }} | {{ '%.1f' % r['import'] }} | {{ '%.1f' % r.export }} | {{ '%.2f' % r.buy }} | {{ '%.2f' % r.sell }} | {{ '%.2f' % r.cost }} |
+{%- set q = pro[i] if cur and pro | count > i else none -%}
+| {{ r.start[11:16] }} | {{ ic.get(r.mode,'') }} | {{ r.floor }}% | **{{ r.soc }}%** | {{ '%.1f' % (r.load + r.ev) }}{{ ' 🚗' if r.ev > 0.05 else '' }} | {{ '%.1f' % r.pv }} | {{ '%.1f' % r.battery }} | {{ '%.1f' % r['import'] }} | {{ '%.1f' % r.export }} | {{ '%.2f' % r.buy }} | {{ '%.2f' % r.sell }} | {{ '%.2f' % r.cost }} | {{ (ic.get(q.mode,'') ~ ' ' ~ q.floor ~ '%') if q else '–' }} | {{ (q.soc ~ '%') if q else '–' }} | {{ ('%.2f' % q.cost) if q else '–' }} |
 {% endfor %}
-kWh/h · koszt w zł (ujemny = zarobek) · \\* SoC teraz = przebieg na harmonogramie, który jest teraz w falowniku
+{%- set kc = h | map(attribute='cost') | sum -%}
+| | | | | | | | | | | | **{{ '%.2f' % kc }}** | | | **{{ ('%.2f' % (pro | map(attribute='cost') | sum)) if cur and pro else '–' }}** |
+
+kWh/h · koszt w zł (ujemny = zarobek)
 {%- endif %}`;
 
   return {
@@ -59,7 +68,7 @@ kWh/h · koszt w zł (ujemny = zarobek) · \\* SoC teraz = przebieg na harmonogr
             }],
           },
           md(slots),
-          { type: "heading", heading: "Co zrobi falownik — godzina po godzinie", heading_style: "subtitle", icon: "mdi:table-clock" },
+          { type: "heading", heading: "Co zrobi falownik (harmonogram w falowniku) — godzina po godzinie", heading_style: "subtitle", icon: "mdi:table-clock" },
           md(hourly),
         ],
       },
