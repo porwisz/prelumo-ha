@@ -12,6 +12,10 @@ PLATFORMS: Final = ["sensor", "binary_sensor", "select", "switch", "time", "numb
 
 UPDATE_INTERVAL: Final = timedelta(seconds=30)
 PLAN_MINUTE: Final = 3  # hourly re-plan at HH:03
+# The 6 slots are a 24 h clock face the inverter repeats every day, so they are built from and
+# judged on the next 24 h: every hour a slot will run in is planned. A shorter window left the
+# hours past its end unplanned, and each re-plan found a "broken" hour entering at the edge.
+SLOT_WINDOW_H: Final = 24
 STORAGE_VERSION: Final = 1
 
 # --- config (setup) ---------------------------------------------------
@@ -94,7 +98,6 @@ OPT_FULL_CHARGE_DAYS: Final = "full_charge_days"
 OPT_BATTERY_FIRST: Final = "battery_first_in_expensive_hours"
 OPT_RESERVE_MARGIN: Final = "reserve_margin"
 OPT_ARBITRAGE_MARGIN: Final = "arbitrage_min_margin"
-OPT_SLOT_WINDOW: Final = "slot_window_hours"
 OPT_FORCE_SELL_PRICE: Final = "force_sell_price"
 OPT_BLOCK_EXPORT_PRICE: Final = "block_export_price"
 OPT_ALERT_SOC: Final = "alert_soc"
@@ -137,7 +140,6 @@ OPTION_DEFAULTS: Final = {
     OPT_BATTERY_FIRST: True,  # expensive hours: house from battery, never buy to sell later
     OPT_ARBITRAGE_MARGIN: 0.5,  # PLN/kWh, min. profit to sell energy bought from the grid
     OPT_RESERVE_MARGIN: 30,  # %, extra on top of the forecast house need in expensive hours
-    OPT_SLOT_WINDOW: 18,  # h; slots are built from the next N hours, the optimiser still sees the horizon
     OPT_FORCE_SELL_PRICE: 0.0,  # PLN/kWh; above this RCE price sell even past the house reserve (0 = off)
     OPT_BLOCK_EXPORT_PRICE: 0.0,  # PLN/kWh; at or below this RCE price never Export First
     OPT_ALERT_SOC: 100,  # % to charge to on a weather alert / before a planned outage (0 = off)

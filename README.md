@@ -12,13 +12,21 @@ Prelumo nie rozmawia z Modbusem — korzysta wyłącznie z encji i akcji HA
 ```
 co 30 s   odczyt harmonogramu → aktywny slot → tryb pracy (Export First tylko w slocie Sell)
 co godz.  prognozy → optymalizator godzinowy na cały horyzont (36 h, DP po SoC)
-          → 6 slotów z najbliższego okna (domyślnie 18 h)
+          → 6 slotów z najbliższych 24 h (cała tarcza zegara, którą falownik powtarza co dobę)
           → porównanie z falownikiem → zapis tylko gdy: istotna zmiana zachowania,
             nowy plan tańszy od obecnego o ≥ „min. zysk” (domyślnie 0,50 zł/24 h)
-            albo obecny łamie limity; maks. 6 zapisów/dobę
+            albo obecny łamie regułę, a nowy nie; maks. 6 zapisów/dobę
 raz/dobę  nauka: profil zużycia, model pompy ciepła, wzorzec Tesli, korekta Solcast,
           rzeczywisty koszt wczoraj (tryb cienia), statystyki doby (autarkia, cykle baterii)
 ```
+
+Zapisy do falownika (pamięć flash) są oszczędzane:
+- koszt i reguły obu harmonogramów — obecnego i nowego — liczone są na tych samych 24 h;
+  zysk to same pieniądze, złamane reguły ocenia się osobno;
+- obecny łamie regułę w ciągu 3 h, a nowy nie → zapis od razu (poza rozłożeniem limitu na dobę);
+- reguła złamana dalej → zapis bez progu „min. zysk”, ale w ramach limitu rozłożonego na dobę;
+- nowy plan łamie regułę, której obecny nie łamie → bez zapisu;
+- pierwsza różnica w zachowaniu dopiero za ≥ 12 h → bez zapisu, kolejne przeliczenia ją zobaczą.
 
 | Wejście | Źródło (domyślnie) |
 |---|---|
@@ -88,7 +96,7 @@ poniżej tej ceny RCE sprzedaż traci pieniądze.
 - **Maks. ładowanie na co dzień** (domyślnie 98%) — ostatnie procenty ładują się długo, więc
   na co dzień plan i sloty ładowania z sieci kończą na tym poziomie.
 - **Pełne ładowanie co N dni** (domyślnie 7, 0 = wył.) — gdy termin (N dni od ostatnich 100%)
-  wypada w oknie slotów (domyślnie 18 h), Prelumo planuje jedno ładowanie do 100% (balansowanie BMS) najtańszym dozwolonym sposobem
+  wypada w ciągu 24 h, Prelumo planuje jedno ładowanie do 100% (balansowanie BMS) najtańszym dozwolonym sposobem
   (PV, tanie godziny; limit ceny obowiązuje). Monitorowanie: `sensor.prelumo_last_full_charge`
   (data ostatnich 100%, `days_since`, `next_due`, `planned`) i `binary_sensor.prelumo_full_charge_due`.
   Ostatnie 100% Prelumo odczytuje z historii SoC przy starcie i na bieżąco z falownika.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import dataclasses
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +16,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from . import PrelumoConfigEntry
+from .const import SLOT_WINDOW_H
 from .coordinator import PrelumoCoordinator
 from .entity import PrelumoEntity
 
@@ -76,7 +78,7 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "current_hourly": r.current_hourly if r else None,
         "slot_costs": r.slot_costs if r else None,
         "current_slot_costs": r.current_slot_costs if r else None,
-        "slot_window_hours": int(c.opt["slot_window_hours"]),
+        "slot_window_hours": SLOT_WINDOW_H,
         # money only; hard rules a schedule breaks are listed in *_issues
         "expected_cost": round(r.slot_plan_money, 2) if r else None,
         "expected_issues": r.slot_plan_issues if r else None,
@@ -84,6 +86,7 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "current_plan_cost": round(r.current_plan_money, 2) if r and r.current_plan_money is not None else None,
         "current_plan_issues": r.current_plan_issues if r else None,
         "gain_vs_current": round(r.gain_vs_current, 2) if r and r.gain_vs_current is not None else None,
+        "rule_check": dataclasses.asdict(r.rules) if r else None,
         "notes": r.notes if r else None,
         "write_decision": ps.write_decision,
         **c.guard.status(dt_util.now()),

@@ -22,6 +22,40 @@ class WritePolicy:
     # (1 + the rest pro rata), unless the current plan breaks rules or the gain is this many
     # times min_gain. Small night-time tweaks no longer use up the writes needed in the day.
     urgent_gain_factor: float = 5.0
+    # A change whose first difference is this many hours ahead waits: the hour is re-planned
+    # (with fresher prices and forecasts) every hour until then. With a 24 h window the clock
+    # hour just passed re-enters at the far end each hour - a tweak there is not worth a write.
+    defer_after_h: int = 12
+
+
+URGENT_HOURS = 3  # a rule the inverter schedule breaks this soon is fixed at once
+
+
+@dataclass(frozen=True)
+class RuleCheck:
+    """The proposal vs the inverter schedule on the hard rules (same forecast, same window).
+
+    A rule broken in the next URGENT_HOURS is fixed at once; one further ahead is fixed whatever
+    the money gain, but within the pacing of writes over the day - so a broken hour far ahead
+    no longer spends the day's writes in the night.
+    """
+
+    urgent: bool = False  # the schedule breaks a rule within URGENT_HOURS, the proposal does not
+    worse: bool = False  # the proposal breaks a rule the schedule keeps
+    fixes: bool = False  # the proposal keeps a rule the schedule breaks (any hour, full charge)
+
+
+def rule_check(current: set[str], proposal: set[str], near: set[str]) -> RuleCheck:
+    """``current``/``proposal``: broken rules as "HH:MM rule" (or a bare rule with no hour);
+    ``near``: the "HH:MM" of the next URGENT_HOURS hours."""
+    def soon(issues: set[str]) -> set[str]:
+        return {v for v in issues if v.split(" ", 1)[0] in near}
+
+    return RuleCheck(
+        urgent=bool(soon(current) - soon(proposal)) and not soon(proposal) - soon(current),
+        worse=bool(proposal - current),
+        fixes=bool(current - proposal),
+    )
 
 
 def material_changes(
@@ -34,22 +68,30 @@ def material_changes(
     """
     if old is None:
         return ["no_current_plan"]
+    reasons = [r for _, r in _differences(old, new, policy, now)]
+    return reasons[:6] + ([f"+{len(reasons) - 6}"] if len(reasons) > 6 else [])
+
+
+def _differences(
+    old: DayPlan, new: DayPlan, policy: WritePolicy, now: datetime | None
+) -> list[tuple[int, str]]:
+    """(minutes from now, "HH:MM:what") of each 15-min sample where the behaviour differs."""
     t0 = (now or datetime(2000, 1, 1)).replace(second=0, microsecond=0)
-    reasons: list[str] = []
+    out: list[tuple[int, str]] = []
     for k in range(max(1, policy.window_h) * 4):
         t = t0 + timedelta(minutes=15 * k)
         a, b = old.active_slot(t), new.active_slot(t)
         when = f"{t:%H:%M}"
         if (a.flags & MANAGED_FLAGS) != (b.flags & MANAGED_FLAGS):
-            reasons.append(f"{when}:mode")
+            out.append((15 * k, f"{when}:mode"))
         elif abs(a.soc - b.soc) >= policy.soc_tolerance:
-            reasons.append(f"{when}:soc")
+            out.append((15 * k, f"{when}:soc"))
         elif abs(a.power - b.power) >= policy.power_tolerance_w:
-            reasons.append(f"{when}:power")
+            out.append((15 * k, f"{when}:power"))
     # a short difference (< start tolerance) is just a boundary shift -> not material
-    if len(reasons) * 15 < policy.start_tolerance_min:
+    if len(out) * 15 < policy.start_tolerance_min:
         return []
-    return reasons[:6] + ([f"+{len(reasons) - 6}"] if len(reasons) > 6 else [])
+    return out
 
 
 @dataclass
@@ -97,17 +139,28 @@ class WriteGuard:
         self.history.append(now)
 
     def decide(
-        self, old: DayPlan | None, new: DayPlan, now: datetime, gain: float | None = None
+        self, old: DayPlan | None, new: DayPlan, now: datetime, gain: float | None = None,
+        rules: RuleCheck | None = None,
     ) -> tuple[bool, list[str]]:
+        """``gain``: money only (PLN over the window, no rule penalties); ``None`` = unknown
+        (backup plan), which is written like an urgent one."""
         reasons = material_changes(old, new, self.policy, now)
         if not reasons:
             return False, ["no_material_change"]
-        if old is not None and gain is not None and gain < self.policy.min_gain:
+        rules = rules or RuleCheck()
+        if (old is not None and gain is not None and not rules.urgent
+                and _differences(old, new, self.policy, now)[0][0] >= self.policy.defer_after_h * 60):
+            return False, ["change_far_ahead", *reasons]
+        if old is not None and rules.worse and not rules.urgent:
+            return False, ["proposal_breaks_rules", *reasons]
+        if (old is not None and gain is not None and gain < self.policy.min_gain
+                and not (rules.urgent or rules.fixes)):
             return False, ["gain_below_threshold", f"{gain:.2f}"]
         ok, why = self.allowed(now)
         if not ok:
             return False, [why or "blocked", *reasons]
-        urgent = old is None or gain is None or gain >= self.policy.urgent_gain_factor * self.policy.min_gain
+        urgent = (old is None or gain is None or rules.urgent
+                  or gain >= self.policy.urgent_gain_factor * self.policy.min_gain)
         if not urgent and len(self._today(now)) >= self.budget(now):
             return False, ["write_budget_paced", *reasons]
-        return True, reasons
+        return True, (["urgent_rule_fix"] if rules.urgent else []) + reasons

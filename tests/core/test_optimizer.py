@@ -153,8 +153,9 @@ def test_write_guard_min_gain():
     a = parse_fallback_plan("00:00 20 none; 05:00 80 grid_charge; 07:00 20; 13:00 20; 16:00 50 grid_charge; 21:00 20")
     c = parse_fallback_plan("00:00 20 none; 05:00 80 grid_charge; 07:00 20; 13:00 20; 16:00 50 sell; 21:00 20")
     g = WriteGuard(WritePolicy(min_gain=0.5))
-    assert g.decide(a, c, D0, gain=0.2) == (False, ["gain_below_threshold", "0.20"])
-    assert g.decide(a, c, D0, gain=1.0)[0]
+    t = D0 + timedelta(hours=6)  # the change (16:00) is within 12 h
+    assert g.decide(a, c, t, gain=0.2) == (False, ["gain_below_threshold", "0.20"])
+    assert g.decide(a, c, t, gain=1.0)[0]
     assert g.decide(None, c, D0, gain=0.0)[0]  # nothing readable on the inverter -> write
 
 
@@ -283,7 +284,8 @@ def test_battery_first_survives_slot_merging_and_replaces_bad_plan():
     bad = parse_fallback_plan("11:00 10; 14:00 98 grid_charge; 16:00 98; 18:00 20 sell; 00:00 98 grid_charge; 07:00 22 sell")
     assert "battery_held_in_expensive_hour" in plan_violations(bad, r.hours[:24], p, Strategy.MAX_GRID_TRADING)
     again = run_planner(inp, p, Strategy.MAX_GRID_TRADING, True, current=bad)
-    assert again.gain_vs_current is None  # cost comparison does not protect a rule-breaking plan
+    # cost comparison does not protect a rule-breaking plan: it is replaced whatever the gain
+    assert again.rules.fixes and not again.rules.worse
 
 
 def test_reserve_for_expensive_hours_after_selling():
@@ -586,7 +588,7 @@ def test_full_charge_starts_early_enough_for_the_taper():
 
 def test_writes_are_paced_over_the_day():
     a = parse_fallback_plan("00:00 20; 05:00 80 grid_charge; 07:00 20; 13:00 20; 16:00 50 grid_charge; 21:00 20")
-    c = parse_fallback_plan("00:00 20 none; 05:00 80 grid_charge; 07:00 20; 13:00 20; 16:00 50 sell; 21:00 20")
+    c = parse_fallback_plan("00:00 20 none; 05:00 80 grid_charge; 07:00 50 sell; 13:00 20; 16:00 50 grid_charge; 21:00 20")
     g = WriteGuard(WritePolicy(max_writes_per_day=6))
     night = D0 + timedelta(hours=2)
     g.history = [D0 + timedelta(minutes=3)]
@@ -595,7 +597,7 @@ def test_writes_are_paced_over_the_day():
     g.record(night)
     assert g.decide(a, c, night + timedelta(hours=1), gain=1.0)[1][0] == "write_budget_paced"
     assert g.decide(a, c, night + timedelta(hours=1), gain=3.0)[0]  # large gain: urgent
-    assert g.decide(a, c, night + timedelta(hours=1), gain=None)[0]  # current plan breaks rules
+    assert g.decide(a, c, night + timedelta(hours=1), gain=None)[0]  # unknown gain (backup plan)
     assert g.decide(a, c, D0 + timedelta(hours=7), gain=1.0)[0]  # by 07:00 the budget is 3
 
 

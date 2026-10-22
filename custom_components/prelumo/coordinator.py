@@ -29,11 +29,11 @@ from .const import (
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_ALERT_LEAD, OPT_ALERT_SOC, OPT_ARBITRAGE_MARGIN, OPT_BATTERY_FIRST, OPT_BLOCK_EXPORT_PRICE, OPT_FORCE_SELL_PRICE, OPT_RESERVE_MARGIN, OPT_SLOT_WINDOW, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_PV_TRUST, OPT_SELL_MIN_POWER, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE,
+    OPT_ALERT_LEAD, OPT_ALERT_SOC, OPT_ARBITRAGE_MARGIN, OPT_BATTERY_FIRST, OPT_BLOCK_EXPORT_PRICE, OPT_FORCE_SELL_PRICE, OPT_RESERVE_MARGIN, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_PV_TRUST, OPT_SELL_MIN_POWER, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE, SLOT_WINDOW_H,
     STORAGE_VERSION, UPDATE_INTERVAL,
 )
 from .core.balance import FULL_SOC, FullChargeTracker
-from .core.diff import WriteGuard, WritePolicy
+from .core.diff import RuleCheck, WriteGuard, WritePolicy
 from .core.forecast.ev import CarState, EvForecast, EvPattern, forecast_ev
 from .core.forecast.heatpump import HeatPumpModel
 from .core.forecast.load import LoadProfile, base_load_samples
@@ -161,7 +161,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         o = self.opt
         return WritePolicy(
             soc_tolerance=int(o[OPT_SOC_TOLERANCE]), max_writes_per_day=int(o[OPT_MAX_WRITES]),
-            min_gain=float(o[OPT_MIN_GAIN]), window_h=int(o[OPT_SLOT_WINDOW]),
+            min_gain=float(o[OPT_MIN_GAIN]), window_h=SLOT_WINDOW_H,
         )
 
     def full_charge_due(self) -> bool:
@@ -170,7 +170,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
     def full_charge_planned(self) -> bool:
         """Plan the 100 % charge when it falls due within the slot window - so the cheapest
         hours around the due time are used, not only the ones after it."""
-        return self.full.due(dt_util.now() + timedelta(hours=int(self.opt[OPT_SLOT_WINDOW])))
+        return self.full.due(dt_util.now() + timedelta(hours=SLOT_WINDOW_H))
 
     def alert_charge(self) -> AlertCharge | None:
         """Charge to be full for a coming power cut: weather warning or a planned outage.
@@ -659,7 +659,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             ev.battery_allowed = [True] * len(hours)
 
         alert = self.alert_charge()
-        inp = PlannerInputs(now, soc, pv, base, hp, ev, sell_h, self.tariff(), horizon, int(o[OPT_SLOT_WINDOW]),
+        inp = PlannerInputs(now, soc, pv, base, hp, ev, sell_h, self.tariff(), horizon, SLOT_WINDOW_H,
                             bool(self.grid_energy), full_by_h=alert.by_hours if alert else None)
         params = self.battery_params()
         result = await self.hass.async_add_executor_job(
@@ -668,7 +668,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         ps.result, ps.proposed, ps.ev = result, result.plan, ev
         ps.pv, ps.load, ps.heat_pump = [pv[h] for h in hours], base, hp
         self.ledger.record_plan(now.date(), result.slot_plan_cost, result.baseline_cost)
-        await self._maybe_write(current, result.plan, now, force_write, result.gain_vs_current)
+        await self._maybe_write(current, result.plan, now, force_write, result.gain_vs_current, result.rules)
 
     async def _next_planned_outage(self, now: datetime, until: datetime) -> datetime | None:
         """Start of the next announced outage in the horizon (any event in the outage calendar)."""
@@ -712,7 +712,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         )
 
     async def _maybe_write(
-        self, current: DayPlan | None, new: DayPlan, now: datetime, force: bool, gain: float | None = None
+        self, current: DayPlan | None, new: DayPlan, now: datetime, force: bool, gain: float | None = None,
+        rules: RuleCheck | None = None,
     ) -> None:
         ps = self.plan_state
         self.guard.policy = self._policy()
@@ -722,7 +723,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         if not self.auto_mode and not force:
             ps.write_decision = ["auto_mode_off"]
             return
-        ok, reasons = self.guard.decide(current, new, now, gain)
+        ok, reasons = self.guard.decide(current, new, now, gain, rules)
         if force and reasons != ["no_material_change"]:
             ok = True
         ps.write_decision = reasons

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from .compress import CAP_PENALTY, Segment, battery_held, compress, settings_from_plan, simulate, to_day_plan
+from .diff import URGENT_HOURS, RuleCheck, rule_check
 from .forecast.ev import EvForecast
 from .optimizer import (
     FULL_CHARGE_PENALTY, BatteryParams, HourInput, OptimizeResult, Strategy, expensive_reserve, optimize,
@@ -26,7 +27,7 @@ class PlannerInputs:
     sell: dict[datetime, float]
     tariff: G13Tariff
     horizon_h: int = 36
-    window_h: int = 18  # the 6 slots are built from (and judged on) this many hours
+    window_h: int = 24  # the 6 slots are built from (and judged on) this many hours
     grid_energy: bool = False  # the battery holds energy bought from the grid
     # deadline (hours from now) for the required full charge; None = anywhere in the slot window.
     # Set when the charge is for a coming power cut, which has a time of its own.
@@ -56,6 +57,7 @@ class PlannerResult:
     current_slot_costs: list[float | None] = field(default_factory=list)
     # what the current_* fields were computed from, so they can follow the inverter between runs
     current: DayPlan | None = None
+    rules: RuleCheck = field(default_factory=RuleCheck)  # proposal vs current on the hard rules
     _ctx: tuple | None = field(default=None, repr=False)
 
     def evaluate_current(self, current: DayPlan | None) -> None:
@@ -66,6 +68,7 @@ class PlannerResult:
         self.current = current
         self.current_plan_cost = self.current_plan_money = None
         self.current_hourly, self.current_plan_issues, self.current_slot_costs = [], [], []
+        self.rules = RuleCheck()
         self.notes = [n for n in self.notes if not n.startswith("current_plan_violates:")]
         if current is None:
             return
@@ -74,16 +77,21 @@ class PlannerResult:
         self.current_plan_money = cost - _penalties(self.current_plan_issues)
         self.current_slot_costs = slot_costs(current, day, self.current_hourly)
         broken = plan_violations(current, day, params, strategy)
-        if broken:  # must be replaceable regardless of cost
+        if broken:
             self.notes.append("current_plan_violates:" + ",".join(broken))
         else:
             self.current_plan_cost = cost
+        near = {f"{h.start:%H:%M}" for h in day[:URGENT_HOURS]}
+        self.rules = rule_check(
+            set(self.current_plan_issues) | rule_breaks(current, day, params, strategy),
+            set(self.slot_plan_issues) | rule_breaks(self.plan, day, params, strategy), near)
 
     @property
     def gain_vs_current(self) -> float | None:
-        if self.current_plan_cost is None:
+        """Money only (PLN in the window): broken rules are judged apart, see ``rules``."""
+        if self.current_plan_money is None:
             return None
-        return self.current_plan_cost - self.slot_plan_cost
+        return self.current_plan_money - self.slot_plan_money
 
     @property
     def expected_savings(self) -> float:
@@ -174,24 +182,33 @@ def plan_violations(
     plan: DayPlan, hours: list[HourInput], params: BatteryParams, strategy: Strategy
 ) -> list[str]:
     """Rules an existing inverter schedule breaks under the current settings."""
+    return sorted({v.split(" ", 1)[1] for v in rule_breaks(plan, hours, params, strategy)})
+
+
+def rule_breaks(
+    plan: DayPlan, hours: list[HourInput], params: BatteryParams, strategy: Strategy
+) -> set[str]:
+    """Settings rules a schedule breaks, as "HH:MM rule" (the hour where it does)."""
     out: set[str] = set()
     reserve = expensive_reserve(hours, params)
     half_step = 0.5 * max(1, params.soc_step)
     for h, res in zip(hours, reserve):
         slot = plan.active_slot(h.start)
+        broke = []
         if slot.mode is SlotMode.SELL:
             if strategy is Strategy.SELF_CONSUMPTION:
-                out.add("sell_in_self_consumption")
+                broke.append("sell_in_self_consumption")
             if slot.soc < params.min_sell_soc:
-                out.add("sell_below_min_soc")
+                broke.append("sell_below_min_soc")
             if slot.soc < params.min_soc + res / params.capacity_kwh * 100 - half_step:
-                out.add("sell_below_expensive_reserve")
+                broke.append("sell_below_expensive_reserve")
         if (slot.mode is SlotMode.GRID_CHARGE and params.max_grid_charge_price is not None
                 and h.buy > params.max_grid_charge_price + 1e-9):
-            out.add("grid_charge_above_price_cap")
+            broke.append("grid_charge_above_price_cap")
         if slot.mode is SlotMode.NONE and battery_held(h, slot.soc, params):
-            out.add("battery_held_in_expensive_hour")
-    return sorted(out)
+            broke.append("battery_held_in_expensive_hour")
+        out.update(f"{h.start:%H:%M} {rule}" for rule in broke)
+    return out
 
 
 def parse_fallback_plan(text: str, power_w: int = MAX_POWER_W) -> DayPlan:

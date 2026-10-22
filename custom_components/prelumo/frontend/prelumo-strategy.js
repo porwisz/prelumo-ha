@@ -94,7 +94,7 @@ function decisionsView(E, I) {
 
 #### Zapis do falownika
 {%- set wd = state_attr('${P}','write_decision') or [] %}
-{%- set why = {'no_material_change':'✅ falownik ma już ten plan (brak istotnej zmiany)','gain_below_threshold':'⏸ nowy plan nie jest wyraźnie tańszy od obecnego','daily_write_limit':'⏸ wyczerpany dzienny limit zapisów','write_budget_paced':'⏸ drobna zmiana — limit zapisów rozłożony na dobę (zapas na później)','min_interval':'⏸ za krótko od poprzedniego zapisu','shadow_mode':'⏸ tryb cienia — nic nie zapisuje','auto_mode_off':'⏸ tryb automatyczny wyłączony','write_failed':'❌ zapis nieudany'} %}
+{%- set why = {'no_material_change':'✅ falownik ma już ten plan (brak istotnej zmiany)','gain_below_threshold':'⏸ nowy plan nie jest wyraźnie tańszy od obecnego','daily_write_limit':'⏸ wyczerpany dzienny limit zapisów','write_budget_paced':'⏸ drobna zmiana — limit zapisów rozłożony na dobę (zapas na później)','min_interval':'⏸ za krótko od poprzedniego zapisu','shadow_mode':'⏸ tryb cienia — nic nie zapisuje','auto_mode_off':'⏸ tryb automatyczny wyłączony','write_failed':'❌ zapis nieudany','change_far_ahead':'⏸ zmiana dopiero za ≥ 12 h — poczeka na kolejne przeliczenia','proposal_breaks_rules':'⏸ nowy plan łamie regułę, której obecny nie łamie','urgent_rule_fix':'⚡ zapisano od razu — obecny plan łamie regułę w ciągu 3 h'} %}
 - **Ostatnia decyzja:** {{ why.get(wd[0], '✅ zapisano nowy plan') if wd else '–' }}{{ (' (' ~ wd[1] ~ ' zł)') if wd and wd[0] == 'gain_below_threshold' else '' }}
 - **Ostatni zapis:** {{ as_timestamp(state_attr('${P}','last_write')) | timestamp_custom(fmt) if state_attr('${P}','last_write') else 'brak' }}
 {%- set wt = state_attr('${P}','writes_today') or [] %}
