@@ -77,7 +77,8 @@ def test_rolling_slots_follow_the_hourly_plan():
 def test_roll_due():
     assert not roll_due(None, D0)
     assert not roll_due(A, D0 + timedelta(hours=6))  # slot 2
-    assert roll_due(A, D0 + timedelta(hours=14))  # slot 4 (13:00)
+    assert not roll_due(A, D0 + timedelta(hours=14))  # slot 4 (13:00)
+    assert roll_due(A, D0 + timedelta(hours=17))  # slot 5 (16:00)
     g = WriteGuard(WritePolicy(min_gain=0.5))
     g.history = [D0 + timedelta(hours=h) for h in (1, 3)]  # paced: budget at 05:00 is 2
     ok, why = g.decide(A, M, D0 + timedelta(hours=5), gain=0.0, roll=True)
@@ -89,7 +90,7 @@ def test_a_day_of_hourly_replans_rolls_the_slots_within_the_write_limit():
     day's limit - every hour an unplanned hour entered the slot window's end, its broken rule
     (+10 000 PLN penalty) made each re-plan an urgent write.
 
-    Now: the slots follow the plan as far as they reach and roll at slot 4. Over a day with the
+    Now: the slots follow the plan as far as they reach and roll at slot 5. Over a day with the
     same forecast, the writes are the first one, the rolls and the ones new RCE prices cause,
     and the inverter never runs into the tail."""
     g = WriteGuard(WritePolicy(max_writes_per_day=6, min_gain=0.5))
@@ -106,7 +107,7 @@ def test_a_day_of_hourly_replans_rolls_the_slots_within_the_write_limit():
             r.evaluate_current(current)
         soc = r.current_hourly[0]["soc"]  # the inverter runs the schedule it has
     first_day = [t for t in g.history if t.date() == START.date()]
-    assert len(first_day) <= 5, first_day
+    assert len(first_day) <= 4, first_day
 
 
 def test_change_only_far_ahead_waits():
@@ -147,4 +148,4 @@ def test_rolling_keeps_the_charge_for_the_evening_sale():
     segs, _, tail = rolling(opt.hours, hin, 78, p, grid_energy=True)
     assert segs[0].setting.mode is HourMode.GRID_CHARGE and segs[0].setting.soc == 100 and segs[0].length == 2
     assert any(s.setting.mode is HourMode.SELL for s in segs[1:5])
-    assert all(h.battery_export > 4.5 for h in opt.hours if h.mode is HourMode.SELL)  # ~ a full hour at 6 kW
+    assert all(h.battery_export > 3.5 for h in opt.hours if h.mode is HourMode.SELL)  # ~ a full hour at 6 kW

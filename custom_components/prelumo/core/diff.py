@@ -31,8 +31,9 @@ class WritePolicy:
 URGENT_HOURS = 3  # a rule the inverter schedule breaks this soon is fixed at once
 # The slots follow the hourly plan only as far as they reach (slot 6 is a safe tail): once the
 # inverter runs this slot, the schedule is written again from the current slot on, so the
-# next slots keep following the plan. Each write then covers 3 slot changes of the day.
-ROLL_SLOT = 4
+# next slots keep following the plan. Each write then covers 4 slot changes of the day, and
+# one slot is left before the tail (which is safe on its own if a roll never arrives).
+ROLL_SLOT = 5
 
 
 def roll_due(plan: DayPlan | None, now: datetime) -> bool:

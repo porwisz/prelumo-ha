@@ -14,7 +14,7 @@ co 30 s   odczyt harmonogramu → aktywny slot → tryb pracy (Export First tylk
 co godz.  prognozy → optymalizator godzinowy na cały horyzont (36 h, DP po SoC)
           → sloty kroczące: sloty 1–5 = kolejne odcinki planu godzinowego (bez ściskania
             całej doby do 6 slotów), slot 6 = bezpieczny ogon do końca doby
-          → porównanie z falownikiem → zapis tylko gdy: falownik doszedł do 4. slotu
+          → porównanie z falownikiem → zapis tylko gdy: falownik doszedł do 5. slotu
             (przesunięcie: bieżący slot staje się pierwszym), istotna zmiana zachowania,
             nowy plan tańszy od obecnego o ≥ „min. zysk” (domyślnie 0,50 zł/24 h)
             albo obecny łamie regułę, a nowy nie; maks. 6 zapisów/dobę
@@ -25,14 +25,16 @@ raz/dobę  nauka: profil zużycia, model pompy ciepła, wzorzec Tesli, korekta S
 Sloty kroczące: plan godzinowy liczony jest na całą dobę i falownik dostaje z niego tyle, ile
 mieści się w slotach — pierwsze 5 odcinków dokładnie, a szósty slot to „ogon” do końca doby.
 Ogon jest wybrany tak, by nie łamał reguł, nawet gdyby nowy harmonogram nigdy nie dotarł
-(np. wyczerpany limit zapisów). Gdy falownik dochodzi do 4. slotu, Prelumo zapisuje harmonogram
-od nowa od bieżącej godziny — jeden zapis obejmuje więc 3 zmiany slotów w ciągu doby.
+(np. wyczerpany limit zapisów). Gdy falownik dochodzi do 5. slotu, Prelumo zapisuje harmonogram
+od nowa od bieżącej godziny — jeden zapis obejmuje więc 4 zmiany slotów w ciągu doby.
 Sloty 1–5 ocenia się razem z dalszym planem godzinowym (kolejne przesunięcia go wykonają),
 więc ładowanie pod sprzedaż za slotami nie jest usuwane jako „strata”. Ogon dobierany jest
 osobno, a regułę, którą łamie, plan pokazuje w `tail_issues` (bez kary w koszcie).
 Optymalizator planuje tylko sprzedaże, które falownik wykona: slot sprzedaży oddaje co najmniej
 „min. moc sprzedaży” aż do progu, potem dom kupuje z sieci — więc gdy dom pobiera, sprzedaż
-musi trwać prawie całą godzinę (np. 0,8 kWh przy 6 kW nie jest możliwe).
+musi trwać prawie całą godzinę (np. 0,8 kWh przy 6 kW nie jest możliwe; tolerancja 0,15 kWh
+zakupu po progu). Progi sprzedaży w slotach są dopasowane do SoC, który falownik naprawdę będzie
+miał na początku sprzedaży (krzywa BMS spowalnia ostatnie %): slot sprzedaje tyle, ile plan.
 Ustawienie godzinowe, które mimo to łamie regułę w symulatorze falownika, jest poprawiane:
 scalenie z sąsiadem, wyższa podłoga sprzedaży albo zwykły slot — tylko gdy obniża to koszt doby.
 

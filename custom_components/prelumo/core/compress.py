@@ -217,7 +217,7 @@ def simulate(
         if soc <= p.min_soc / 100 * cap + 0.1:
             grid_energy = False
         house_import = min(imp, max(0.0, h.load - h.pv))
-        if expensive and sold_since_cheap > 0.1 and house_import > 0.1:
+        if expensive and sold_since_cheap > 0.1 and house_import > SELL_THEN_BUY_KWH:
             # hard rule (reserve): battery energy was sold and now the house buys at this price
             cost += broke("house_buys_after_sale")
         wear = (-bus / eta) * p.wear_cost if bus < 0 else 0.0
@@ -320,6 +320,58 @@ def _tidy(segs: list[Segment], cost_of, current: float) -> tuple[list[Segment], 
     return segs, current
 
 
+def _align_sell_floors(
+    segs: list[Segment], plan: list[HourPlan], hours: list[HourInput], soc_now: float,
+    params: BatteryParams, grid_energy: bool,
+) -> list[Segment]:
+    """Sell floors that sell what the plan sells, from the SoC the inverter will really have.
+
+    The optimiser's SoC grid rounds (and the BMS taper slows the last %), so the battery often
+    starts a sale a % or so below the plan; a floor kept as planned would then end the sale
+    early and the house would buy for the rest of the hour. Each sell segment's floor is
+    lowered (never raised) by that shortfall, in order, as the simulator sees it.
+    """
+    out = [Segment(s.start, s.length, s.setting) for s in segs]
+    for i, s in enumerate(out):
+        if s.setting.mode is not HourMode.SELL:
+            continue
+        _, traj = simulate(hours, _expand(out), soc_now, params, grid_energy=grid_energy)
+        start_soc = traj[s.start - 1] if s.start > 0 else soc_now
+        planned = plan[s.start].soc_start
+        if start_soc >= planned:
+            continue
+        floor = max(params.min_sell_soc, math.floor(s.setting.soc - (planned - start_soc)))
+        if floor < s.setting.soc:
+            out[i] = Segment(s.start, s.length, Setting(HourMode.SELL, floor, s.setting.power_kw))
+    return out
+
+
+def _tidy_money(segs: list[Segment], money_rules) -> list[Segment]:
+    """``_tidy`` for the rolling slots: a join may cost at most TIDY_TOLERANCE in money and
+    must not break more rules than before."""
+    n_rules, money = money_rules(segs)
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(segs) - 1):
+            a, b = segs[i], segs[i + 1]
+            if a.setting.mode is not b.setting.mode:
+                continue
+            best = None
+            for cand in _candidates(a.setting, b.setting):
+                if cand.mode is not a.setting.mode:
+                    continue
+                trial = segs[:i] + [Segment(a.start, a.length + b.length, cand)] + segs[i + 2 :]
+                r, m = money_rules(trial)
+                if r <= n_rules and m <= money + TIDY_TOLERANCE and (best is None or m < best[1]):
+                    best = (r, m, trial)
+            if best is not None:
+                n_rules, money, segs = best
+                merged = True
+                break
+    return segs
+
+
 def _pad(segs: list[Segment], slots: int) -> list[Segment]:
     while len(segs) < slots:  # split the longest segment
         i = max(range(len(segs)), key=lambda k: segs[k].length)
@@ -382,8 +434,18 @@ def rolling(
         return min(trials, key=lambda t: (round(soft_cost(t, last.start), 3),
                                           t[-1].setting.mode is not HourMode.NORMAL, t[-1].setting.soc))
 
+    def money_rules(ss: list[Segment]) -> tuple[int, float]:
+        v: list[str] = []
+        cost, traj = simulate(hours, _expand(ss), soc_now, params, grid_energy=grid_energy, risk=True,
+                              violations=v)
+        pen = sum(FULL_CHARGE_PENALTY if x == "full_charge_missing" else CAP_PENALTY for x in v)
+        return len(v), cost - pen + sum(hold_cost(s, params) for s in traj)
+
     segs = _segments(plan, hours, params)
-    segs, _ = _tidy(segs, cost_of, cost_of(segs))
+    segs = _align_sell_floors(segs, plan, hours, soc_now, params, grid_energy)
+    # Tidy on money: a join that also clears a broken rule must not win by gutting the plan
+    # (e.g. grid charge to 34 / 70 / 98 % joined into one "to 34 %" that drops the evening sale).
+    segs = _tidy_money(segs, money_rules)
     # Repair: an hourly setting taken one to one can break a rule the optimiser does not model
     # (e.g. a sell slot's minimum power empties it before the hour ends, then the house buys).
     # Change a segment in the slots - join it with a neighbour, raise a sell floor, or make it
@@ -400,8 +462,9 @@ def rolling(
                 options += [segs[:i] + [Segment(a.start, a.length + b.length, c)] + segs[i + 2 :]
                             for c in _candidates(a.setting, b.setting)]
             alt = [Setting(HourMode.NORMAL, a.setting.soc), Setting(HourMode.NORMAL, params.min_soc)]
-            if a.setting.mode is HourMode.SELL:
-                alt += [Setting(HourMode.SELL, min(100, a.setting.soc + k * step)) for k in (1, 2, 3)]
+            if a.setting.mode is HourMode.SELL:  # a floor a step or two off fits the hour
+                alt += [Setting(HourMode.SELL, max(params.min_sell_soc, min(100, a.setting.soc + k * step)))
+                        for k in (-3, -2, -1, 1, 2, 3)]
             options += [segs[:i] + [Segment(a.start, a.length, st)] + segs[i + 1 :]
                         for st in alt if st != a.setting]
             for trial in options:

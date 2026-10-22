@@ -21,7 +21,7 @@ from functools import lru_cache
 EPS = 0.05  # kWh
 INFEASIBLE = 1e6
 FULL_CHARGE_PENALTY = 1e3  # PLN; a due full charge is done whenever it is possible at all
-SELL_THEN_BUY_KWH = 0.05  # house energy bought in a sell hour after its floor - a broken rule above
+SELL_THEN_BUY_KWH = 0.15  # kWh the house may buy in a sell hour after its floor (~0.2 PLN); more breaks a rule
 # Objective only (not in reported costs): stored energy "costs" a little per hour, more above
 # HIGH_SOC. Among equally cheap hours the battery is charged as late as possible - just before
 # the expensive / sell hours - instead of filling up at once and sitting full all night.
