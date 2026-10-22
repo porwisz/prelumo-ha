@@ -29,6 +29,15 @@ class WritePolicy:
 
 
 URGENT_HOURS = 3  # a rule the inverter schedule breaks this soon is fixed at once
+# The slots follow the hourly plan only as far as they reach (slot 6 is a safe tail): once the
+# inverter runs this slot, the schedule is written again from the current slot on, so the
+# next slots keep following the plan. Each write then covers 3 slot changes of the day.
+ROLL_SLOT = 4
+
+
+def roll_due(plan: DayPlan | None, now: datetime) -> bool:
+    """The inverter has reached slot ROLL_SLOT (or later) of its schedule."""
+    return plan is not None and plan.active_index(now) >= ROLL_SLOT - 1
 
 
 @dataclass(frozen=True)
@@ -41,7 +50,7 @@ class RuleCheck:
     """
 
     urgent: bool = False  # the schedule breaks a rule within URGENT_HOURS, the proposal does not
-    worse: bool = False  # the proposal breaks a rule the schedule keeps
+    worse: bool = False  # the proposal breaks a rule the schedule keeps, and no fewer rules
     fixes: bool = False  # the proposal keeps a rule the schedule breaks (any hour, full charge)
 
 
@@ -53,7 +62,7 @@ def rule_check(current: set[str], proposal: set[str], near: set[str]) -> RuleChe
 
     return RuleCheck(
         urgent=bool(soon(current) - soon(proposal)) and not soon(proposal) - soon(current),
-        worse=bool(proposal - current),
+        worse=bool(proposal - current) and len(proposal) >= len(current),
         fixes=bool(current - proposal),
     )
 
@@ -140,27 +149,29 @@ class WriteGuard:
 
     def decide(
         self, old: DayPlan | None, new: DayPlan, now: datetime, gain: float | None = None,
-        rules: RuleCheck | None = None,
+        rules: RuleCheck | None = None, roll: bool = False,
     ) -> tuple[bool, list[str]]:
         """``gain``: money only (PLN over the window, no rule penalties); ``None`` = unknown
-        (backup plan), which is written like an urgent one."""
+        (backup plan), which is written like an urgent one. ``roll``: the inverter has reached
+        slot ROLL_SLOT - a changed schedule is written to keep the slots ahead of it."""
         reasons = material_changes(old, new, self.policy, now)
         if not reasons:
             return False, ["no_material_change"]
         rules = rules or RuleCheck()
-        if (old is not None and gain is not None and not rules.urgent
+        if (old is not None and gain is not None and not (rules.urgent or roll)
                 and _differences(old, new, self.policy, now)[0][0] >= self.policy.defer_after_h * 60):
             return False, ["change_far_ahead", *reasons]
         if old is not None and rules.worse and not rules.urgent:
             return False, ["proposal_breaks_rules", *reasons]
         if (old is not None and gain is not None and gain < self.policy.min_gain
-                and not (rules.urgent or rules.fixes)):
+                and not (rules.urgent or rules.fixes or roll)):
             return False, ["gain_below_threshold", f"{gain:.2f}"]
         ok, why = self.allowed(now)
         if not ok:
             return False, [why or "blocked", *reasons]
-        urgent = (old is None or gain is None or rules.urgent
+        urgent = (old is None or gain is None or rules.urgent or roll
                   or gain >= self.policy.urgent_gain_factor * self.policy.min_gain)
         if not urgent and len(self._today(now)) >= self.budget(now):
             return False, ["write_budget_paced", *reasons]
-        return True, (["urgent_rule_fix"] if rules.urgent else []) + reasons
+        tag = ["urgent_rule_fix"] if rules.urgent else ["roll_slots"] if roll else []
+        return True, tag + reasons

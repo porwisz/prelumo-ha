@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from core.diff import RuleCheck, WriteGuard, WritePolicy, rule_check
+from core.diff import RuleCheck, WriteGuard, WritePolicy, roll_due, rule_check
 from core.forecast.ev import EvForecast
 from core.optimizer import BatteryParams, Strategy
 from core.planner import PlannerInputs, parse_fallback_plan, run_planner
@@ -42,38 +42,71 @@ def test_distant_rule_fix_waits_for_the_write_budget():
     assert g.decide(A, M, D0 + timedelta(hours=7), rules=RuleCheck(urgent=True))[1][0] == "daily_write_limit"
 
 
-def test_unchanged_forecast_does_not_rewrite_the_schedule_every_night_hour():
+RCE = {0: 0.7, 1: 0.7, 2: 0.66, 3: 0.65, 4: 0.63, 5: 0.67, 6: 0.88, 7: 1.1, 8: 1.27, 9: 1.25,
+       10: 1.24, 11: 1.39, 12: 1.28, 13: 1.31, 14: 1.26, 15: 1.36, 16: 1.39, 17: 1.26, 18: 1.39,
+       19: 1.4, 20: 1.26, 21: 1.01, 22: 0.89, 23: 0.81}
+LIVE = BatteryParams(capacity_kwh=26.25, min_soc=20, max_soc=98, max_charge_kw=10, max_discharge_kw=10,
+                     soc_step=2, max_grid_charge_price=0.63, battery_first_above=0.63, min_sell_soc=20,
+                     sell_min_power_kw=6)
+TARIFF = G13Tariff(0.9048, 1.4961, 0.6257)
+START = datetime(2026, 10, 22)  # Thursday
+
+
+def _plan_at(now, soc, current=None):
+    hours = [START + timedelta(hours=i) for i in range(72)]
+    known = now.date() + timedelta(days=1 if now.hour >= 14 else 0)  # tomorrow's RCE at 14:00
+    sell = {h: RCE[h.hour] for h in hours if h.date() <= known}
+    hs = [h for h in hours if h >= now.replace(minute=0)][:36]
+    load = [4.0 if 11 <= h.hour < 16 else 0.8 if 16 <= h.hour < 22 else 0.4 for h in hs]
+    inp = PlannerInputs(now, soc, {h: 0.0 for h in hs}, load, [0.0] * 36,
+                        EvForecast([0.0] * 36, [], [False] * 36), sell, TARIFF, 36, grid_energy=True)
+    return run_planner(inp, LIVE, Strategy.MAX_GRID_TRADING, arbitrage=True, current=current)
+
+
+def test_rolling_slots_follow_the_hourly_plan():
+    r = _plan_at(START + timedelta(minutes=3), 56.0)
+    tail = [n for n in r.notes if n.startswith("tail_from_")]
+    assert tail, r.notes  # more segments in the day than slots: the last slot is a tail
+    assert r.slot_plan_issues == []  # the tail breaks no rule even if never rolled
+    assert r.plan.slots[0].start == 0  # slot 1 = the current hour
+    for seg in r.segments[:5]:  # slots 1-5 run the hourly plan's settings
+        for i in range(seg.start, seg.start + seg.length):
+            assert r.slot_hourly[i]["mode"] == r.optimum.hours[i].mode.value or seg.setting.mode.value == "normal"
+
+
+def test_roll_due():
+    assert not roll_due(None, D0)
+    assert not roll_due(A, D0 + timedelta(hours=6))  # slot 2
+    assert roll_due(A, D0 + timedelta(hours=14))  # slot 4 (13:00)
+    g = WriteGuard(WritePolicy(min_gain=0.5))
+    g.history = [D0 + timedelta(hours=h) for h in (1, 3)]  # paced: budget at 05:00 is 2
+    ok, why = g.decide(A, M, D0 + timedelta(hours=5), gain=0.0, roll=True)
+    assert ok and why[0] == "roll_slots"  # no gain needed, past the pacing
+
+
+def test_a_day_of_hourly_replans_rolls_the_slots_within_the_write_limit():
     """Regression (user report, 2026-10-22): writes at 00, 01, 02, 03, 05 and 06 used the whole
-    day's limit. The 6 slots were built from a 12 h window; each hour a new hour entered at the
-    window's end, run by a slot planned for the hour before - a "broken rule" there (+10 000 PLN
-    penalty) made every re-plan an urgent write past the pacing."""
-    start = datetime(2026, 10, 22)  # Thursday
-    hours = [start + timedelta(hours=i) for i in range(48)]
-    rce = {0: 0.7, 1: 0.7, 2: 0.66, 3: 0.65, 4: 0.63, 5: 0.67, 6: 0.88, 7: 1.1, 8: 1.27, 9: 1.25,
-           10: 1.24, 11: 1.39, 12: 1.28, 13: 1.31, 14: 1.26, 15: 1.36, 16: 1.39, 17: 1.26, 18: 1.39,
-           19: 1.4, 20: 1.26, 21: 1.01, 22: 0.89, 23: 0.81}
-    sell = {h: rce[h.hour] for h in hours[:24]}  # tomorrow's RCE not published yet
-    load = {h: (4.0 if 11 <= h.hour < 16 else 0.8 if 16 <= h.hour < 22 else 0.4) for h in hours}
-    p = BatteryParams(capacity_kwh=26.25, min_soc=20, max_soc=98, max_charge_kw=10, max_discharge_kw=10,
-                      soc_step=2, max_grid_charge_price=0.63, battery_first_above=0.63, min_sell_soc=20,
-                      sell_min_power_kw=6)
-    tariff = G13Tariff(0.9048, 1.4961, 0.6257)
+    day's limit - every hour an unplanned hour entered the slot window's end, its broken rule
+    (+10 000 PLN penalty) made each re-plan an urgent write.
+
+    Now: the slots follow the plan as far as they reach and roll at slot 4. Over a day with the
+    same forecast, the writes are the first one, the rolls and the ones new RCE prices cause,
+    and the inverter never runs into the tail."""
     g = WriteGuard(WritePolicy(max_writes_per_day=6, min_gain=0.5))
-    current, soc, written = None, 56.0, []
-    for k in range(8):  # 00:03 ... 07:03
-        now = start + timedelta(hours=k, minutes=3)
-        hs = [h for h in hours if h >= now.replace(minute=0)][:36]
-        inp = PlannerInputs(now, soc, {h: 0.0 for h in hs}, [load[h] for h in hs], [0.0] * 36,
-                            EvForecast([0.0] * 36, [], [False] * 36), sell, tariff, 36, grid_energy=True)
-        r = run_planner(inp, p, Strategy.MAX_GRID_TRADING, arbitrage=True, current=current)
-        ok, why = g.decide(current, r.plan, now, r.gain_vs_current, r.rules)
+    current, soc = None, 56.0
+    for k in range(29):  # 22.10 00:03 ... 23.10 04:03
+        now = START + timedelta(hours=k, minutes=3)
+        if current is not None:
+            assert current.active_index(now) < 5, f"{now:%H:%M} runs the tail"
+        r = _plan_at(now, soc, current)
+        ok, _ = g.decide(current, r.plan, now, r.gain_vs_current, r.rules, roll=roll_due(current, now))
         if ok:
             g.record(now)
-            written.append((f"{now:%H:%M}", why[:2]))
             current = r.plan
             r.evaluate_current(current)
         soc = r.current_hourly[0]["soc"]  # the inverter runs the schedule it has
-    assert len(written) <= 2, written
+    first_day = [t for t in g.history if t.date() == START.date()]
+    assert len(first_day) <= 5, first_day
 
 
 def test_change_only_far_ahead_waits():

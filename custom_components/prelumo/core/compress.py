@@ -1,8 +1,13 @@
-"""Hourly optimiser output -> at most 6 inverter slots, with minimal cost loss.
+"""Hourly optimiser output -> 6 inverter slots.
 
 A small inverter simulator models how the Deye actually behaves for a given slot
-setting (mode + SoC); adjacent segments are merged greedily, always choosing the merge
-whose simulated cost increase is the smallest.
+setting (mode + SoC).
+
+``rolling`` (what the planner uses): the slots follow the hourly plan exactly as far as they
+reach - slots 1-5 are its next segments, slot 6 a safe tail to the end of the day - and
+Prelumo writes again before the tail is reached (see diff.ROLL_SLOT). ``compress`` squeezes a
+whole window into 6 slots by greedy cost-aware merging, always choosing the merge whose
+simulated cost increase is the smallest.
 """
 
 from __future__ import annotations
@@ -270,6 +275,137 @@ def _candidates(a: Setting, b: Setting) -> list[Setting]:
 TIDY_TOLERANCE = 0.05  # PLN: a simpler schedule is worth this much
 
 
+def _segments(plan: list[HourPlan], hours: list[HourInput], params: BatteryParams) -> list[Segment]:
+    segs: list[Segment] = []
+    for i, hp in enumerate(plan):
+        st = hour_setting(hp, hours[i], stored_energy_value(plan, hours, i, params), params)
+        if segs and segs[-1].setting == st:
+            segs[-1].length += 1
+        else:
+            segs.append(Segment(i, 1, st))
+    return segs
+
+
+def _cost_fn(hours: list[HourInput], soc_now: float, params: BatteryParams, grid_energy: bool):
+    def cost_of(ss: list[Segment]) -> float:
+        # + the optimiser's holding cost: of two equally cheap schedules, the one that charges
+        # later (just before the energy is needed) wins
+        cost, traj = simulate(hours, _expand(ss), soc_now, params, grid_energy=grid_energy, risk=True)
+        return cost + sum(hold_cost(s, params) for s in traj)
+    return cost_of
+
+
+def _tidy(segs: list[Segment], cost_of, current: float) -> tuple[list[Segment], float]:
+    """Join neighbours of the same mode when it costs (almost) nothing - e.g. grid charge to
+    38 %, 40 %, 48 % in three slots becomes one slot to 48 %."""
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(segs) - 1):
+            a, b = segs[i], segs[i + 1]
+            if a.setting.mode is not b.setting.mode:
+                continue
+            best = None
+            for cand in _candidates(a.setting, b.setting):
+                if cand.mode is not a.setting.mode:
+                    continue
+                trial = segs[:i] + [Segment(a.start, a.length + b.length, cand)] + segs[i + 2 :]
+                c = cost_of(trial)
+                if best is None or c < best[0] - 1e-9:
+                    best = (c, trial)
+            if best is not None and best[0] <= current + TIDY_TOLERANCE:
+                current, segs, merged = best[0], best[1], True
+                break
+    return segs, current
+
+
+def _pad(segs: list[Segment], slots: int) -> list[Segment]:
+    while len(segs) < slots:  # split the longest segment
+        i = max(range(len(segs)), key=lambda k: segs[k].length)
+        s = segs[i]
+        if s.length < 2:
+            break
+        half = s.length // 2
+        segs[i : i + 1] = [Segment(s.start, half, s.setting), Segment(s.start + half, s.length - half, s.setting)]
+    return segs
+
+
+def rolling(
+    plan: list[HourPlan],
+    hours: list[HourInput],
+    soc_now: float,
+    params: BatteryParams,
+    slots: int = SLOT_COUNT,
+    window: int = 24,
+    grid_energy: bool = False,
+) -> tuple[list[Segment], float, int | None]:
+    """Slots that follow the hourly plan exactly as far as they reach.
+
+    Returns (segments, cost, tail): ``tail`` is the hour index from which the last slot no
+    longer follows the plan (``None``: the whole window fits). Unless a new schedule is
+    written first, the tail runs to the end of the day, so it is the cheapest rule-abiding of
+    the plan's own setting there and a plain "battery covers the house" slot.
+    """
+    n = min(window, len(plan))
+    plan, hours = plan[:n], hours[:n]
+    cost_of = _cost_fn(hours, soc_now, params, grid_energy)
+
+    def fit(ss: list[Segment]) -> tuple[float, list[Segment]]:
+        """The schedule the slots hold: the first segments, then the tail."""
+        if len(ss) <= slots:
+            return cost_of(ss), ss
+        last = ss[slots - 1]
+        options = {last.setting, Setting(HourMode.NORMAL, params.min_soc)}
+        if last.setting.mode is HourMode.NORMAL:
+            options.add(Setting(HourMode.NORMAL, last.setting.soc))
+        trials = [ss[: slots - 1] + [Segment(last.start, n - last.start, st)] for st in options]
+        # on a tie the passive setting, then the lower floor
+        best = min(trials, key=lambda t: (round(cost_of(t), 3), t[-1].setting.mode is not HourMode.NORMAL,
+                                          t[-1].setting.soc))
+        return cost_of(best), best
+
+    segs = _segments(plan, hours, params)
+    segs, _ = _tidy(segs, cost_of, cost_of(segs))
+    # Repair: an hourly setting taken one to one can break a rule the optimiser does not model
+    # (e.g. a sell slot's minimum power empties it before the hour ends, then the house buys).
+    # Change a segment in the slots - join it with a neighbour, raise a sell floor, or make it
+    # a plain slot - while that lowers the cost of the day.
+    current, _ = fit(segs)
+    step = max(1, params.soc_step)
+    for _ in range(4 * slots):
+        best = None
+        for i in range(min(len(segs), slots)):
+            a = segs[i]
+            options: list[list[Segment]] = []
+            if i + 1 < len(segs):
+                b = segs[i + 1]
+                options += [segs[:i] + [Segment(a.start, a.length + b.length, c)] + segs[i + 2 :]
+                            for c in _candidates(a.setting, b.setting)]
+            alt = [Setting(HourMode.NORMAL, a.setting.soc), Setting(HourMode.NORMAL, params.min_soc)]
+            if a.setting.mode is HourMode.SELL:
+                alt += [Setting(HourMode.SELL, min(100, a.setting.soc + k * step)) for k in (1, 2, 3)]
+            options += [segs[:i] + [Segment(a.start, a.length, st)] + segs[i + 1 :]
+                        for st in alt if st != a.setting]
+            for trial in options:
+                c, _ = fit(trial)
+                if c < current - 0.01 and (best is None or c < best[0]):
+                    best = (c, trial)
+        if best is None:
+            break
+        current, segs = best
+        joined: list[Segment] = []  # neighbours that became identical
+        for s in segs:
+            if joined and joined[-1].setting == s.setting:
+                joined[-1].length += s.length
+            else:
+                joined.append(Segment(s.start, s.length, s.setting))
+        segs = joined
+    tail = segs[slots - 1].start if len(segs) > slots else None
+    _, segs = fit(segs)
+    segs = _pad(segs, slots)
+    return segs, simulate(hours, _expand(segs), soc_now, params, grid_energy=grid_energy)[0], tail
+
+
 def compress(
     plan: list[HourPlan],
     hours: list[HourInput],
@@ -282,19 +418,8 @@ def compress(
     """Greedy cost-aware merge of hourly settings into ``slots`` segments (first 24 h)."""
     n = min(window, len(plan))
     plan, hours = plan[:n], hours[:n]
-    segs: list[Segment] = []
-    for i, hp in enumerate(plan):
-        st = hour_setting(hp, hours[i], stored_energy_value(plan, hours, i, params), params)
-        if segs and segs[-1].setting == st:
-            segs[-1].length += 1
-        else:
-            segs.append(Segment(i, 1, st))
-
-    def cost_of(ss: list[Segment]) -> float:
-        # + the optimiser's holding cost: of two equally cheap schedules, the one that charges
-        # later (just before the energy is needed) wins
-        cost, traj = simulate(hours, _expand(ss), soc_now, params, grid_energy=grid_energy, risk=True)
-        return cost + sum(hold_cost(s, params) for s in traj)
+    segs = _segments(plan, hours, params)
+    cost_of = _cost_fn(hours, soc_now, params, grid_energy)
 
     current = cost_of(segs)
     while len(segs) > slots:
@@ -319,26 +444,7 @@ def compress(
             else:
                 joined.append(s)
         segs = joined
-    # Tidy: join neighbours of the same mode when it costs (almost) nothing - e.g. grid charge
-    # to 38 %, 40 %, 48 % in three slots becomes one slot to 48 % - which frees slots below.
-    merged = True
-    while merged:
-        merged = False
-        for i in range(len(segs) - 1):
-            a, b = segs[i], segs[i + 1]
-            if a.setting.mode is not b.setting.mode:
-                continue
-            best = None
-            for cand in _candidates(a.setting, b.setting):
-                if cand.mode is not a.setting.mode:
-                    continue
-                trial = segs[:i] + [Segment(a.start, a.length + b.length, cand)] + segs[i + 2 :]
-                c = cost_of(trial)
-                if best is None or c < best[0] - 1e-9:
-                    best = (c, trial)
-            if best is not None and best[0] <= current + TIDY_TOLERANCE:
-                current, segs, merged = best[0], best[1], True
-                break
+    segs, current = _tidy(segs, cost_of, current)  # frees slots for the step below
     # Free slots: cut the idle tail off sell slots (e.g. sell 20:00, then the battery is at the
     # floor all night - the night part becomes a normal slot instead of Export First).
     changed = True
@@ -362,13 +468,7 @@ def compress(
             if len(trial) <= slots and cost_of(trial) <= current + TIDY_TOLERANCE:
                 segs, current, changed = trial, cost_of(trial), True
                 break
-    while len(segs) < slots:  # pad: split the longest segment
-        i = max(range(len(segs)), key=lambda k: segs[k].length)
-        s = segs[i]
-        if s.length < 2:
-            break
-        half = s.length // 2
-        segs[i : i + 1] = [Segment(s.start, half, s.setting), Segment(s.start + half, s.length - half, s.setting)]
+    segs = _pad(segs, slots)
     return segs, simulate(hours, _expand(segs), soc_now, params, grid_energy=grid_energy)[0]
 
 

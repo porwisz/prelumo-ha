@@ -12,20 +12,33 @@ Prelumo nie rozmawia z Modbusem — korzysta wyłącznie z encji i akcji HA
 ```
 co 30 s   odczyt harmonogramu → aktywny slot → tryb pracy (Export First tylko w slocie Sell)
 co godz.  prognozy → optymalizator godzinowy na cały horyzont (36 h, DP po SoC)
-          → 6 slotów z najbliższych 24 h (cała tarcza zegara, którą falownik powtarza co dobę)
-          → porównanie z falownikiem → zapis tylko gdy: istotna zmiana zachowania,
+          → sloty kroczące: sloty 1–5 = kolejne odcinki planu godzinowego (bez ściskania
+            całej doby do 6 slotów), slot 6 = bezpieczny ogon do końca doby
+          → porównanie z falownikiem → zapis tylko gdy: falownik doszedł do 4. slotu
+            (przesunięcie: bieżący slot staje się pierwszym), istotna zmiana zachowania,
             nowy plan tańszy od obecnego o ≥ „min. zysk” (domyślnie 0,50 zł/24 h)
             albo obecny łamie regułę, a nowy nie; maks. 6 zapisów/dobę
 raz/dobę  nauka: profil zużycia, model pompy ciepła, wzorzec Tesli, korekta Solcast,
           rzeczywisty koszt wczoraj (tryb cienia), statystyki doby (autarkia, cykle baterii)
 ```
 
+Sloty kroczące: plan godzinowy liczony jest na całą dobę i falownik dostaje z niego tyle, ile
+mieści się w slotach — pierwsze 5 odcinków dokładnie, a szósty slot to „ogon” do końca doby.
+Ogon jest wybrany tak, by nie łamał reguł, nawet gdyby nowy harmonogram nigdy nie dotarł
+(np. wyczerpany limit zapisów). Gdy falownik dochodzi do 4. slotu, Prelumo zapisuje harmonogram
+od nowa od bieżącej godziny — jeden zapis obejmuje więc 3 zmiany slotów w ciągu doby.
+Ustawienie godzinowe, które w symulatorze falownika łamie regułę (np. sprzedaż z min. mocą
+slotu kończy się przed końcem godziny), jest poprawiane: scalenie z sąsiadem, wyższa podłoga
+sprzedaży albo zwykły slot — tylko gdy obniża to koszt doby.
+
 Zapisy do falownika (pamięć flash) są oszczędzane:
 - koszt i reguły obu harmonogramów — obecnego i nowego — liczone są na tych samych 24 h;
-  zysk to same pieniądze, złamane reguły ocenia się osobno;
+  obecny oceniany jest tak, jak zadziała po przesunięciu (od jego ostatniego slotu dalej
+  według planu), więc zysk mierzy tylko to, co naprawdę się zmieni;
+- zysk to same pieniądze, złamane reguły ocenia się osobno;
 - obecny łamie regułę w ciągu 3 h, a nowy nie → zapis od razu (poza rozłożeniem limitu na dobę);
 - reguła złamana dalej → zapis bez progu „min. zysk”, ale w ramach limitu rozłożonego na dobę;
-- nowy plan łamie regułę, której obecny nie łamie → bez zapisu;
+- nowy plan łamie regułę, której obecny nie łamie (i nie łamie mniej reguł) → bez zapisu;
 - pierwsza różnica w zachowaniu dopiero za ≥ 12 h → bez zapisu, kolejne przeliczenia ją zobaczą.
 
 | Wejście | Źródło (domyślnie) |

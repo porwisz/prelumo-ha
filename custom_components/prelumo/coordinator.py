@@ -33,7 +33,7 @@ from .const import (
     STORAGE_VERSION, UPDATE_INTERVAL,
 )
 from .core.balance import FULL_SOC, FullChargeTracker
-from .core.diff import RuleCheck, WriteGuard, WritePolicy
+from .core.diff import RuleCheck, WriteGuard, WritePolicy, roll_due
 from .core.forecast.ev import CarState, EvForecast, EvPattern, forecast_ev
 from .core.forecast.heatpump import HeatPumpModel
 from .core.forecast.load import LoadProfile, base_load_samples
@@ -723,7 +723,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         if not self.auto_mode and not force:
             ps.write_decision = ["auto_mode_off"]
             return
-        ok, reasons = self.guard.decide(current, new, now, gain, rules)
+        ok, reasons = self.guard.decide(current, new, now, gain, rules, roll=rules is not None and roll_due(current, now))
         if force and reasons != ["no_material_change"]:
             ok = True
         ps.write_decision = reasons

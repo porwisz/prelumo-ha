@@ -1,18 +1,18 @@
-"""End-to-end planning pipeline: forecasts + prices -> hourly optimum -> 6-slot DayPlan."""
+"""End-to-end planning pipeline: forecasts + prices -> hourly optimum -> rolling 6-slot DayPlan."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from .compress import CAP_PENALTY, Segment, battery_held, compress, settings_from_plan, simulate, to_day_plan
+from .compress import CAP_PENALTY, Segment, battery_held, rolling, settings_from_plan, simulate, to_day_plan
 from .diff import URGENT_HOURS, RuleCheck, rule_check
 from .forecast.ev import EvForecast
 from .optimizer import (
     FULL_CHARGE_PENALTY, BatteryParams, HourInput, OptimizeResult, Strategy, expensive_reserve, optimize,
     simulate_baseline,
 )
-from .plan import MAX_POWER_W, DayPlan, PlanError, Slot, SlotMode, parse_hhmm
+from .plan import MAX_POWER_W, SLOT_COUNT, DayPlan, PlanError, Slot, SlotMode, parse_hhmm
 from .tariff import G13Tariff
 
 
@@ -58,6 +58,9 @@ class PlannerResult:
     # what the current_* fields were computed from, so they can follow the inverter between runs
     current: DayPlan | None = None
     rules: RuleCheck = field(default_factory=RuleCheck)  # proposal vs current on the hard rules
+    # the schedule now on the inverter as it will run: its last slot is replaced by the plan
+    # when the slots roll (diff.ROLL_SLOT) - money only; gain and rules are judged on this
+    current_rolled_money: float | None = None
     _ctx: tuple | None = field(default=None, repr=False)
 
     def evaluate_current(self, current: DayPlan | None) -> None:
@@ -66,7 +69,7 @@ class PlannerResult:
             return
         day, soc, params, strategy, grid_energy = self._ctx
         self.current = current
-        self.current_plan_cost = self.current_plan_money = None
+        self.current_plan_cost = self.current_plan_money = self.current_rolled_money = None
         self.current_hourly, self.current_plan_issues, self.current_slot_costs = [], [], []
         self.rules = RuleCheck()
         self.notes = [n for n in self.notes if not n.startswith("current_plan_violates:")]
@@ -81,17 +84,27 @@ class PlannerResult:
             self.notes.append("current_plan_violates:" + ",".join(broken))
         else:
             self.current_plan_cost = cost
+        # The slots roll before the schedule's last slot runs (a rolled schedule's last slot is
+        # its tail), so from there on both schedules are the plan: compare only what differs.
+        cut = next((i for i, h in enumerate(day) if current.active_index(h.start) == SLOT_COUNT - 1), len(day))
+        rolled = settings_from_plan(current, day)[:cut] + settings_from_plan(self.plan, day)[cut:]
+        rolled_issues: list[str] = []
+        cost = simulate(day, rolled, soc, params, grid_energy=grid_energy, violations=rolled_issues)[0]
+        self.current_rolled_money = cost - _penalties(rolled_issues)
+        before = {f"{h.start:%H:%M}" for h in day[:cut]}
+        breaks = ({v for v in rule_breaks(current, day, params, strategy) if v.split(" ", 1)[0] in before}
+                  | {v for v in rule_breaks(self.plan, day, params, strategy) if v.split(" ", 1)[0] not in before})
         near = {f"{h.start:%H:%M}" for h in day[:URGENT_HOURS]}
-        self.rules = rule_check(
-            set(self.current_plan_issues) | rule_breaks(current, day, params, strategy),
-            set(self.slot_plan_issues) | rule_breaks(self.plan, day, params, strategy), near)
+        self.rules = rule_check(set(rolled_issues) | breaks,
+                                set(self.slot_plan_issues) | rule_breaks(self.plan, day, params, strategy), near)
 
     @property
     def gain_vs_current(self) -> float | None:
-        """Money only (PLN in the window): broken rules are judged apart, see ``rules``."""
-        if self.current_plan_money is None:
+        """Money only (PLN in the window) against the inverter schedule as it will run (its
+        last slot rolled into the plan); broken rules are judged apart, see ``rules``."""
+        if self.current_rolled_money is None:
             return None
-        return self.current_plan_money - self.slot_plan_money
+        return self.current_rolled_money - self.slot_plan_money
 
     @property
     def expected_savings(self) -> float:
@@ -146,7 +159,7 @@ def run_planner(
     full_by = window if inp.full_by_h is None else max(1, min(window, inp.full_by_h))
     opt = optimize(hin, inp.soc, params, strategy, arbitrage, grid_energy=inp.grid_energy,
                    full_by=full_by)
-    segs, _ = compress(opt.hours, hin, inp.soc, params, window=window, grid_energy=inp.grid_energy)
+    segs, _, tail = rolling(opt.hours, hin, inp.soc, params, window=window, grid_energy=inp.grid_energy)
     plan = to_day_plan(segs, hin, params, current, soc_now=inp.soc)
     day = hin[:window]
     slot_hourly: list[dict] = []
@@ -155,6 +168,8 @@ def run_planner(
                          grid_energy=inp.grid_energy, violations=slot_issues)[0]
     base = simulate_baseline(day, inp.soc, params)
     notes = list(opt.notes)
+    if tail is not None:  # the last slot stops following the plan here; written again before
+        notes.append(f"tail_from_{hin[tail].start:%H:%M}")
     if missing:
         notes.append(f"sell_price_missing_{missing}h")
     res = PlannerResult(plan, hin, opt, segs, slot_cost, base, missing, notes, None,
