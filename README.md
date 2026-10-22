@@ -27,9 +27,14 @@ mieści się w slotach — pierwsze 5 odcinków dokładnie, a szósty slot to �
 Ogon jest wybrany tak, by nie łamał reguł, nawet gdyby nowy harmonogram nigdy nie dotarł
 (np. wyczerpany limit zapisów). Gdy falownik dochodzi do 4. slotu, Prelumo zapisuje harmonogram
 od nowa od bieżącej godziny — jeden zapis obejmuje więc 3 zmiany slotów w ciągu doby.
-Ustawienie godzinowe, które w symulatorze falownika łamie regułę (np. sprzedaż z min. mocą
-slotu kończy się przed końcem godziny), jest poprawiane: scalenie z sąsiadem, wyższa podłoga
-sprzedaży albo zwykły slot — tylko gdy obniża to koszt doby.
+Sloty 1–5 ocenia się razem z dalszym planem godzinowym (kolejne przesunięcia go wykonają),
+więc ładowanie pod sprzedaż za slotami nie jest usuwane jako „strata”. Ogon dobierany jest
+osobno, a regułę, którą łamie, plan pokazuje w `tail_issues` (bez kary w koszcie).
+Optymalizator planuje tylko sprzedaże, które falownik wykona: slot sprzedaży oddaje co najmniej
+„min. moc sprzedaży” aż do progu, potem dom kupuje z sieci — więc gdy dom pobiera, sprzedaż
+musi trwać prawie całą godzinę (np. 0,8 kWh przy 6 kW nie jest możliwe).
+Ustawienie godzinowe, które mimo to łamie regułę w symulatorze falownika, jest poprawiane:
+scalenie z sąsiadem, wyższa podłoga sprzedaży albo zwykły slot — tylko gdy obniża to koszt doby.
 
 Zapisy do falownika (pamięć flash) są oszczędzane:
 - koszt i reguły obu harmonogramów — obecnego i nowego — liczone są na tych samych 24 h;

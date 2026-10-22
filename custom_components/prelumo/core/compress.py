@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .optimizer import (
-    FULL_CHARGE_PENALTY, BatteryParams, HourInput, HourMode, HourPlan, expensive_reserve, hold_cost,
+    FULL_CHARGE_PENALTY, SELL_THEN_BUY_KWH, BatteryParams, HourInput, HourMode, HourPlan, expensive_reserve, hold_cost,
     max_charge_kwh, pv_risk, risk_cost,
 )
 from .plan import MAX_POWER_W, SLOT_COUNT, DayPlan, Slot, SlotMode
@@ -197,7 +197,7 @@ def simulate(
             rate = min(run_kw, p.grid_export_kw + net)
             tau = min(1.0, -bus / rate) if rate > 0 else 0.0
             shift = net * (1.0 - tau)
-            if shift > 0.05:
+            if shift > SELL_THEN_BUY_KWH:
                 # hard rule: a sell slot never exports and then buys within the same hour - it
                 # would hit its floor early and leave the house on the grid for the rest
                 cost += broke("sell_then_buy_in_hour")
@@ -273,6 +273,7 @@ def _candidates(a: Setting, b: Setting) -> list[Setting]:
 
 
 TIDY_TOLERANCE = 0.05  # PLN: a simpler schedule is worth this much
+TAIL_RULE_COST = 1.0  # PLN per rule the rolling tail breaks (it runs only if no roll arrives)
 
 
 def _segments(plan: list[HourPlan], hours: list[HourInput], params: BatteryParams) -> list[Segment]:
@@ -342,27 +343,44 @@ def rolling(
     """Slots that follow the hourly plan exactly as far as they reach.
 
     Returns (segments, cost, tail): ``tail`` is the hour index from which the last slot no
-    longer follows the plan (``None``: the whole window fits). Unless a new schedule is
-    written first, the tail runs to the end of the day, so it is the cheapest rule-abiding of
-    the plan's own setting there and a plain "battery covers the house" slot.
+    longer follows the plan (``None``: the whole window fits). The tail runs only if the slots
+    are not rolled in time (diff.ROLL_SLOT): it is the cheapest of the plan's own setting there
+    and a plain "battery covers the house" slot, and a rule it breaks costs TAIL_RULE_COST,
+    not a hard-rule penalty - one setting rarely suits the rest of a day, and a broken rule
+    there must not reshape the slots that will run.
     """
     n = min(window, len(plan))
     plan, hours = plan[:n], hours[:n]
     cost_of = _cost_fn(hours, soc_now, params, grid_energy)
+    stamps = [f"{h.start:%H:%M}" for h in hours]
 
-    def fit(ss: list[Segment]) -> tuple[float, list[Segment]]:
-        """The schedule the slots hold: the first segments, then the tail."""
+    def soft_cost(ss: list[Segment], start: int | None) -> float:
+        """Cost with a rule broken from hour ``start`` on counted as TAIL_RULE_COST only."""
+        v: list[str] = []
+        cost, traj = simulate(hours, _expand(ss), soc_now, params, grid_energy=grid_energy, risk=True,
+                              violations=v)
+        late = set(stamps[start:]) if start is not None else set()
+        soft = sum(1 for x in v if x.split(" ", 1)[0] in late)
+        return cost - soft * (CAP_PENALTY - TAIL_RULE_COST) + sum(hold_cost(s, params) for s in traj)
+
+    def judge(ss: list[Segment]) -> float:
+        """The slots that will run, followed by the rest of the plan (later rolls write it):
+        charging now for a sale beyond the slots is judged with that sale. Rules broken past
+        the slots are fixed when they roll in, so they do not steer the slots."""
+        return soft_cost(ss, ss[slots - 1].start if len(ss) > slots else None)
+
+    def with_tail(ss: list[Segment]) -> list[Segment]:
+        """The schedule written: the slots, then the tail instead of the rest of the plan."""
         if len(ss) <= slots:
-            return cost_of(ss), ss
+            return ss
         last = ss[slots - 1]
         options = {last.setting, Setting(HourMode.NORMAL, params.min_soc)}
         if last.setting.mode is HourMode.NORMAL:
             options.add(Setting(HourMode.NORMAL, last.setting.soc))
         trials = [ss[: slots - 1] + [Segment(last.start, n - last.start, st)] for st in options]
         # on a tie the passive setting, then the lower floor
-        best = min(trials, key=lambda t: (round(cost_of(t), 3), t[-1].setting.mode is not HourMode.NORMAL,
-                                          t[-1].setting.soc))
-        return cost_of(best), best
+        return min(trials, key=lambda t: (round(soft_cost(t, last.start), 3),
+                                          t[-1].setting.mode is not HourMode.NORMAL, t[-1].setting.soc))
 
     segs = _segments(plan, hours, params)
     segs, _ = _tidy(segs, cost_of, cost_of(segs))
@@ -370,7 +388,7 @@ def rolling(
     # (e.g. a sell slot's minimum power empties it before the hour ends, then the house buys).
     # Change a segment in the slots - join it with a neighbour, raise a sell floor, or make it
     # a plain slot - while that lowers the cost of the day.
-    current, _ = fit(segs)
+    current = judge(segs)
     step = max(1, params.soc_step)
     for _ in range(4 * slots):
         best = None
@@ -387,7 +405,7 @@ def rolling(
             options += [segs[:i] + [Segment(a.start, a.length, st)] + segs[i + 1 :]
                         for st in alt if st != a.setting]
             for trial in options:
-                c, _ = fit(trial)
+                c = judge(trial)
                 if c < current - 0.01 and (best is None or c < best[0]):
                     best = (c, trial)
         if best is None:
@@ -401,8 +419,7 @@ def rolling(
                 joined.append(Segment(s.start, s.length, s.setting))
         segs = joined
     tail = segs[slots - 1].start if len(segs) > slots else None
-    _, segs = fit(segs)
-    segs = _pad(segs, slots)
+    segs = _pad(with_tail(segs), slots)
     return segs, simulate(hours, _expand(segs), soc_now, params, grid_energy=grid_energy)[0], tail
 
 

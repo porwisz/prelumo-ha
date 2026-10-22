@@ -116,3 +116,35 @@ def test_change_only_far_ahead_waits():
     assert g.decide(A, C, D0 + timedelta(hours=5), gain=3.0)[0]
     assert g.decide(None, C, D0)[0]  # nothing on the inverter: write
     assert g.decide(A, C, D0)[0]  # backup plan (gain unknown): write
+
+
+# live inputs, 2026-10-22 14:03 (diagnostics): (load, ev, pv, buy, sell) per hour from 14:00
+LIVE_1403 = [
+    (3.4, 7.22, 0.19, .6257, 1.26), (4.51, 8, 0.12, .6257, 1.36), (0.6, 0, 0.07, 1.4961, 1.39),
+    (0.72, 0, 0.01, 1.4961, 1.26), (0.92, 0, 0, 1.4961, 1.39), (0.75, 0, 0, 1.4961, 1.4),
+    (0.69, 0, 0, 1.4961, 1.26), (0.64, 8, 0, .6257, 1.01), (0.82, 3.9, 0, .6257, 0.89), (0.48, 0, 0, .6257, 0.81),
+    *[(x, 0, 0, .6257, 0) for x in (0.49, 0.51, 0.52, 0.53, 0.54, 1.71, 0.62)],
+    (0.87, 0, 0.23, .9048, 0), (1.22, 0, 1.6, .9048, 0), (1.14, 0, 3.42, .9048, 0), (3.28, 0, 3.88, .9048, 0),
+    (5.56, 0, 4.24, .9048, 0), (1.25, 0, 4.13, .9048, 0), (2.6, 0, 3.76, .6257, 0), (4.70, 0, 3.48, .6257, 0),
+    (4.51, 0, 2.56, .6257, 0), *[(x, 0, pv, 1.4961, 0) for x, pv in ((1.40, 1.49), (1.46, 0.07), (1.77, 0),
+                                                                      (2.10, 0), (1.24, 0))],
+    *[(x, 0, 0, .6257, 0) for x in (0.68, 2.90, 2.65, 2.63, 2.65)],
+]
+
+
+def test_rolling_keeps_the_charge_for_the_evening_sale():
+    """Regression (live, 2026-10-22 14:03): optimum = grid charge 14-15 to 100 %, sell 16-20.
+    The proposal was one "sell to 76 %" slot from 14:00 to 19:00 - no charge at all."""
+    from core.compress import rolling
+    from core.optimizer import HourInput, HourMode, optimize
+    t0 = datetime(2026, 10, 22, 14)
+    hin = [HourInput(t0 + timedelta(hours=i), pv, load, ev, buy, sell)
+           for i, (load, ev, pv, buy, sell) in enumerate(LIVE_1403)]
+    p = BatteryParams(capacity_kwh=26.25, min_soc=20, max_soc=100, require_full=True, battery_first_above=0.62572,
+                      max_charge_kw=8, wear_cost=0.1, soc_step=2, max_grid_charge_price=0.62572, min_sell_soc=20,
+                      sell_min_power_kw=6, pv_trust=0.5, arbitrage_min_margin=0.5)
+    opt = optimize(hin, 78, p, Strategy.MAX_GRID_TRADING, True, grid_energy=True, full_by=24)
+    segs, _, tail = rolling(opt.hours, hin, 78, p, grid_energy=True)
+    assert segs[0].setting.mode is HourMode.GRID_CHARGE and segs[0].setting.soc == 100 and segs[0].length == 2
+    assert any(s.setting.mode is HourMode.SELL for s in segs[1:5])
+    assert all(h.battery_export > 4.5 for h in opt.hours if h.mode is HourMode.SELL)  # ~ a full hour at 6 kW

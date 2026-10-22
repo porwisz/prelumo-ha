@@ -82,6 +82,7 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         # money only; hard rules a schedule breaks are listed in *_issues
         "expected_cost": round(r.slot_plan_money, 2) if r else None,
         "expected_issues": r.slot_plan_issues if r else None,
+        "tail_issues": r.tail_issues if r else None,  # only if the slots are not rolled in time
         "baseline_cost": round(r.baseline_cost, 2) if r else None,
         "current_plan_cost": round(r.current_plan_money, 2) if r and r.current_plan_money is not None else None,
         "current_plan_issues": r.current_plan_issues if r else None,

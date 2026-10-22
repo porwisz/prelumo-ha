@@ -61,6 +61,10 @@ class PlannerResult:
     # the schedule now on the inverter as it will run: its last slot is replaced by the plan
     # when the slots roll (diff.ROLL_SLOT) - money only; gain and rules are judged on this
     current_rolled_money: float | None = None
+    # rules the proposal's tail breaks (it runs only if the slots are not rolled in time):
+    # listed apart, not in slot_plan_issues or the cost, and left out of the rule comparison
+    tail_issues: list[str] = field(default_factory=list)
+    tail_from: int | None = None
     _ctx: tuple | None = field(default=None, repr=False)
 
     def evaluate_current(self, current: DayPlan | None) -> None:
@@ -95,8 +99,12 @@ class PlannerResult:
         breaks = ({v for v in rule_breaks(current, day, params, strategy) if v.split(" ", 1)[0] in before}
                   | {v for v in rule_breaks(self.plan, day, params, strategy) if v.split(" ", 1)[0] not in before})
         near = {f"{h.start:%H:%M}" for h in day[:URGENT_HOURS]}
-        self.rules = rule_check(set(rolled_issues) | breaks,
-                                set(self.slot_plan_issues) | rule_breaks(self.plan, day, params, strategy), near)
+        late = {f"{h.start:%H:%M}" for h in day[self.tail_from:]} if self.tail_from is not None else set()
+        def head(vs: set[str]) -> set[str]:
+            return {v for v in vs if v.split(" ", 1)[0] not in late}
+        self.rules = rule_check(head(set(rolled_issues) | breaks),
+                                head(set(self.slot_plan_issues) | rule_breaks(self.plan, day, params, strategy)),
+                                near)
 
     @property
     def gain_vs_current(self) -> float | None:
@@ -168,13 +176,19 @@ def run_planner(
                          grid_energy=inp.grid_energy, violations=slot_issues)[0]
     base = simulate_baseline(day, inp.soc, params)
     notes = list(opt.notes)
+    tail_issues: list[str] = []
     if tail is not None:  # the last slot stops following the plan here; written again before
         notes.append(f"tail_from_{hin[tail].start:%H:%M}")
+        late = {f"{h.start:%H:%M}" for h in day[tail:]}
+        tail_issues = [v for v in slot_issues if v.split(" ", 1)[0] in late]
+        slot_issues = [v for v in slot_issues if v not in tail_issues]
+        slot_cost -= CAP_PENALTY * len(tail_issues)
     if missing:
         notes.append(f"sell_price_missing_{missing}h")
     res = PlannerResult(plan, hin, opt, segs, slot_cost, base, missing, notes, None,
                         slot_hourly, [], slot_cost - _penalties(slot_issues), slot_issues,
                         slot_costs=slot_costs(plan, day, slot_hourly),
+                        tail_issues=tail_issues, tail_from=tail,
                         _ctx=(day, inp.soc, params, strategy, inp.grid_energy))
     res.evaluate_current(current)
     return res

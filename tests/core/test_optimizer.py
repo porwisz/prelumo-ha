@@ -125,11 +125,11 @@ def test_min_sell_soc_floor():
     sell = [0.3] * 24
     sell[19] = 3.0
     hrs = day([0.6] * 24, sell)
-    r = optimize(hrs, 60, replace(P, min_sell_soc=40), Strategy.MAX_GRID_TRADING)
+    r = optimize(hrs, 60, replace(P, min_sell_soc=40, sell_min_power_kw=0), Strategy.MAX_GRID_TRADING)
     assert r.hours[19].mode is HourMode.SELL
     assert all(h.soc_end >= 40 for h in r.hours if h.battery_export > 0.06)
-    segs, _ = compress(r.hours, hrs, 60, replace(P, min_sell_soc=40))
-    plan = to_day_plan(segs, hrs, replace(P, min_sell_soc=40))
+    segs, _ = compress(r.hours, hrs, 60, replace(P, min_sell_soc=40, sell_min_power_kw=0))
+    plan = to_day_plan(segs, hrs, replace(P, min_sell_soc=40, sell_min_power_kw=0))
     assert all(s.soc >= 40 for s in plan.slots if s.mode is SlotMode.SELL)
 
 
@@ -691,3 +691,19 @@ def test_force_sell_never_goes_below_min_sell_soc():
     p = replace(P, min_sell_soc=30, battery_first_above=0.63, force_sell_above=1.0)
     r = optimize(hrs, 90, p, Strategy.MAX_GRID_TRADING, arbitrage=True)
     assert min(h.soc_end for h in r.hours) >= 30
+
+
+def test_no_sale_the_inverter_cannot_make():
+    """Regression (live, 2026-10-22 14:03): the plan sold 0.78 kWh at 17:00 and 0.81 kWh at
+    20:00. A sell slot discharges at >= sell_min_power (6 kW) until its floor, then the house
+    buys for the rest of the hour - such a sale breaks the sell-then-buy rule, and repairing it
+    reshaped the slots (the 14-15 grid charge vanished into a sell slot)."""
+    from dataclasses import replace
+    sell = [0.3] * 24
+    sell[19] = 3.0
+    hrs = day([0.6] * 24, sell)  # house draws 1 kWh every hour
+    p = replace(P, min_sell_soc=40, sell_min_power_kw=6)
+    r = optimize(hrs, 60, p, Strategy.MAX_GRID_TRADING)  # 4 kWh above the floor: < 6 kW for an hour
+    assert r.hours[19].mode is not HourMode.SELL
+    r = optimize(hrs, 80, p, Strategy.MAX_GRID_TRADING)  # 8 kWh: a full hour at 6 kW fits
+    assert r.hours[19].mode is HourMode.SELL and r.hours[19].battery_export > 5

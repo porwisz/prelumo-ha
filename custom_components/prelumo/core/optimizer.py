@@ -21,6 +21,7 @@ from functools import lru_cache
 EPS = 0.05  # kWh
 INFEASIBLE = 1e6
 FULL_CHARGE_PENALTY = 1e3  # PLN; a due full charge is done whenever it is possible at all
+SELL_THEN_BUY_KWH = 0.05  # house energy bought in a sell hour after its floor - a broken rule above
 # Objective only (not in reported costs): stored energy "costs" a little per hour, more above
 # HIGH_SOC. Among equally cheap hours the battery is charged as late as possible - just before
 # the expensive / sell hours - instead of filling up at once and sitting full all night.
@@ -303,6 +304,13 @@ def _transition(
         return None
     if battery_export > EPS and (s1 - p.min_soc) / 100 * p.capacity_kwh < reserve - 1e-9:
         return None  # keep energy for the house in the coming expensive hours
+    if battery_export > EPS and deficit > EPS:
+        # A sell slot discharges at its power (never below sell_min_power) until its floor; then
+        # the battery stops covering the house, which buys for the rest of the hour. So a sale
+        # while the house draws must last (almost) the whole hour - a small one is not doable.
+        rate = min(p.sell_min_power_kw, p.max_discharge_kw, p.grid_export_kw + deficit)
+        if delivered < rate * (1 - SELL_THEN_BUY_KWH / deficit) - 1e-6:
+            return None
     if grid_charge > EPS and p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9:
         return None
     if ev_blocked and delivered > base_deficit + EPS:
