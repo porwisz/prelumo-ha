@@ -43,7 +43,7 @@ from .core.plan import SLOT_COUNT, DayPlan, PlanError, Slot, SlotMode, same_beha
 from .core.planner import PlannerInputs, PlannerResult, horizon_hours, parse_fallback_plan, run_planner
 from .core.shadow import ShadowLedger, energy_cost
 from .core.stock import MAX_TICK_KWH, BatteryStock, account_tick
-from .core.taper import charge_events, merge_events, taper_from_events
+from .core.taper import STALL_BAND, charge_events, merge_events, taper_from_events
 from .core.tariff import G13Tariff
 from .ha_io import inputs as io
 from .ha_io.inverter import InverterWriter
@@ -122,6 +122,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         # manual schedule draft (Edycja tab): follows the inverter until edited
         self._draft: list[Slot] | None = None
         self.taper_events: list[dict] = []  # measured climbs to 100 % (minutes per SoC band)
+        self._last_soc: float | None = None  # previous 30 s reading (a stall at 99 % ends on a drop)
         # runtime controls (restored by entities)
         self.strategy = Strategy.SELF_CONSUMPTION
         self.arbitrage = False
@@ -260,6 +261,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         except Exception as err:  # noqa: BLE001 - recorder may not be ready
             _LOGGER.debug("SoC history lookup failed: %s", err)
             return
+        soc = io.state_float(self.hass, self.inv.soc)
+        if soc is not None and (not points or points[-1][0] < end):
+            points.append((end, soc))  # the recorder may not have committed the latest change yet
         merged = merge_events(self.taper_events, charge_events(points))
         if merged != self.taper_events:
             self.taper_events = merged
@@ -366,6 +370,14 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 self.config_entry.async_create_background_task(
                     self.hass, self.async_replan(), f"{DOMAIN}_after_full_charge"
                 )
+        if (self._last_soc is not None and data.soc is not None
+                and self._last_soc >= STALL_BAND > data.soc and self._last_soc < FULL_SOC):
+            # a climb stalled in the last % and dropped: its time at 99 % still teaches the taper
+            self.config_entry.async_create_background_task(
+                self.hass, self._learn_taper(), f"{DOMAIN}_learn_taper"
+            )
+        if data.soc is not None:
+            self._last_soc = data.soc
         if io.alert_active(self.hass, self.conf.get(CONF_ALERT_ENTITY)) != self.alert_on:
             # a warning appeared or ended: plan at once, do not wait for the hour
             self.config_entry.async_create_background_task(

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from core.compress import compress, simulate, to_day_plan
+from core.compress import Setting, compress, hour_setting, simulate, to_day_plan
 from core.diff import WriteGuard, WritePolicy, material_changes
 from core.optimizer import (
     BatteryParams, HourInput, HourMode, Strategy, max_charge_kwh, optimize, simulate_baseline,
@@ -707,3 +707,41 @@ def test_no_sale_the_inverter_cannot_make():
     assert r.hours[19].mode is not HourMode.SELL
     r = optimize(hrs, 80, p, Strategy.MAX_GRID_TRADING)  # 8 kWh: a full hour at 6 kW fits
     assert r.hours[19].mode is HourMode.SELL and r.hours[19].battery_export > 5
+
+
+# learned on the Deye (6, 7, 15 Oct): 99 -> 100 % took up to 75 min
+LEARNED_TAPER = ((90, 6.3), (95, 2.95), (98, 1.58), (99, 0.21))
+
+
+def test_the_slow_last_percent_is_never_rounded_away():
+    """Regression (22 Oct): 99 % at 15:15, the expensive hours from 16:00. The plan expected
+    100 % by 16:00 - half a 2 % SoC step of rounding hid the whole ~75 min last % - and the
+    full charge stopped at 99 %."""
+    from dataclasses import replace
+    p = replace(P, capacity_kwh=26.25, min_soc=20, max_charge_kw=10, soc_step=2, require_full=True,
+                max_grid_charge_price=0.63, charge_taper=LEARNED_TAPER)
+    one = [Setting(HourMode.GRID_CHARGE, 100), Setting(HourMode.NORMAL, 20)]
+    viol: list[str] = []
+    simulate(day([0.63, 1.5], [0.3, 1.4]), one, 98, p, violations=viol)
+    assert "full_charge_missing" in viol  # 98 -> 99.7 % in the hour: not full
+    # the optimiser: from 98 % with one cheap hour left the 100 % is not possible today
+    r = optimize(day([0.63] + [1.5] * 5, [0.3] + [1.4] * 5), 98, p, Strategy.SELF_CONSUMPTION, full_by=6)
+    assert "full_charge_not_possible_in_horizon" in r.notes
+
+
+def test_full_charge_tops_up_over_two_cheap_hours():
+    """The last % takes over an hour: the plan grid-charges to 100 % in two cheap hours before the
+    expensive ones, and the inverter simulation really reaches 100 %."""
+    from dataclasses import replace
+    p = replace(P, capacity_kwh=26.25, min_soc=20, max_charge_kw=10, soc_step=2, require_full=True,
+                max_grid_charge_price=0.63, charge_taper=LEARNED_TAPER)
+    buy = [0.63] * 4 + [1.5] * 4
+    hrs = day(buy, [0.3] * 4 + [1.4] * 4, load=[0.5] * 8)
+    r = optimize(hrs, 80, p, Strategy.SELF_CONSUMPTION, full_by=8)
+    assert "full_charge_planned" in r.notes
+    charge = [i for i, h in enumerate(r.hours) if h.mode is HourMode.GRID_CHARGE]
+    assert charge and max(charge) == 3 and len(charge) >= 2  # topping hour right before 16:00
+    assert r.hours[3].soc_end == 100
+    viol: list[str] = []
+    _, traj = simulate(hrs, [hour_setting(h) for h in r.hours], 80, p, violations=viol)
+    assert max(traj[:4]) > 99.95 and "full_charge_missing" not in viol

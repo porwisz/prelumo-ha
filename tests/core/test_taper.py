@@ -37,3 +37,26 @@ def test_slowest_recent_charge_sets_the_taper():
     # from 80 %: one hour reaches only ~99 %, the last % needs over an hour more
     assert max_charge_kwh(80, p) / 0.2625 < 19.5
     assert max_charge_kwh(99, p) / 0.2625 < 0.8
+
+
+# 22 Oct: 90 % at 14:31, 95 % 14:44, 98 % 15:03, 99 % 15:15, back to 98 % at 16:05 (no 100 %)
+OCT22 = climb({47: 0, 90: 91, 92: 94, 95: 104, 98: 123, 99: 135}) + [(T0 + timedelta(minutes=185), 98.0)]
+
+
+def test_a_climb_stalled_at_99_teaches_a_lower_bound():
+    ev = charge_events(OCT22)
+    assert len(ev) == 1
+    assert ev[0]["minutes"] == {"90": 13.0, "95": 19.0, "98": 12.0}
+    assert ev[0]["at_least"] == {"99": 50.0}
+    # alone it caps the last %: at most 1 % in 50 min
+    taper = dict(taper_from_events(ev, 26.25))
+    assert abs(taper[99] - 0.2625 / (50 / 60)) < 0.01
+    # with a slower complete charge the slowest still wins
+    taper = dict(taper_from_events(merge_events(charge_events(OCT15), ev), 26.25))
+    assert abs(taper[99] - 0.2625 / (77 / 60)) < 0.01
+
+
+def test_a_stop_below_99_is_not_a_stall():
+    # everyday limit: 94 % held, then the house discharges it - no taper information
+    pts = climb({50: 0, 90: 20, 94: 30}) + [(T0 + timedelta(minutes=90), 93.0)]
+    assert charge_events(pts) == []

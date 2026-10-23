@@ -236,8 +236,9 @@ def simulate(
             })
     tp = min((h.buy for h in hours), default=0.0) * eta
     cost -= (soc - p.min_soc / 100 * cap) * tp
-    if p.require_full and hours and max(traj, default=0.0) < p.max_soc - 1:
-        # the periodic 100 % charge is due in this window: schedules that skip it lose
+    if p.require_full and hours and max(traj, default=0.0) < p.max_soc - 0.05:
+        # the periodic 100 % charge is due in this window: schedules that skip it (or stop in
+        # the slow last %) lose
         cost += FULL_CHARGE_PENALTY
         if violations is not None:
             violations.append("full_charge_missing")
