@@ -1,7 +1,9 @@
 """Day plan model for a Deye-style 6-slot Time-of-Use schedule.
 
-Pure Python, no Home Assistant imports. Validation mirrors the ESPHome
-``zapisz_harmonogram`` action exactly, so a plan accepted here is accepted by the ESP.
+Pure Python, no Home Assistant imports. A plan may start at any slot (the planner keeps
+slot 1 at the hour it was made, so the midnight crossing can fall anywhere); the inverter
+only takes the crossing between slot 6 and slot 1, so ``to_service_data`` always sends the
+slots from the earliest start. That order passes the ESPHome ``zapisz_harmonogram`` checks.
 """
 
 from __future__ import annotations
@@ -89,13 +91,31 @@ class DayPlan:
         return cls(tuple(Slot(*v) for v in zip(start, power, soc, flags)))
 
     def to_service_data(self) -> dict[str, list[int]]:
-        """Payload for ``esphome.<device>_zapisz_harmonogram``."""
+        """Payload for ``esphome.<device>_zapisz_harmonogram``, from the earliest start.
+
+        Deye runs a slot from its start to the next slot's start and wraps only from slot 6
+        to slot 1: a slot crossing midnight elsewhere never becomes active (26 Oct: slot 3
+        21:00-03:00 never ran, the 20:00 slot kept running and grid charging never started)."""
+        slots = self.ascending().slots
         return {
-            "start": [s.start for s in self.slots],
-            "moc": [s.power for s in self.slots],
-            "soc": [s.soc for s in self.slots],
-            "flagi": [s.flags for s in self.slots],
+            "start": [s.start for s in slots],
+            "moc": [s.power for s in slots],
+            "soc": [s.soc for s in slots],
+            "flagi": [s.flags for s in slots],
         }
+
+    def rotated(self, first: int) -> DayPlan:
+        """Same schedule, listed from slot ``first`` (0-based) on."""
+        return DayPlan(self.slots[first:] + self.slots[:first])
+
+    def ascending(self) -> DayPlan:
+        """Listed from the earliest start - the order the inverter needs."""
+        return self.rotated(min(range(SLOT_COUNT), key=lambda i: self.slots[i].start_minutes))
+
+    def rolled_from(self, anchor: datetime) -> DayPlan:
+        """Listed from the slot active at ``anchor``: the planner's order for a schedule
+        written then (slot 1 = the hour of the write, the last slot = the tail)."""
+        return self.rotated(self.active_index(anchor))
 
     def with_slot(self, index: int, slot: Slot) -> DayPlan:
         slots = list(self.slots)
@@ -103,13 +123,15 @@ class DayPlan:
         return DayPlan(tuple(slots))
 
     def merge_preserved_flags(self, current: DayPlan | None) -> DayPlan:
-        """Keep bits we do not manage (1-4) as read from the inverter."""
+        """Keep bits we do not manage (1-4) as read from the inverter (from the slot running
+        at the new slot's start: the two schedules may list the slots in another order)."""
         if current is None:
             return self
         return DayPlan(
             tuple(
-                replace(new, flags=(new.flags & MANAGED_FLAGS) | (old.flags & ~MANAGED_FLAGS))
-                for new, old in zip(self.slots, current.slots)
+                replace(new, flags=(new.flags & MANAGED_FLAGS)
+                        | (current.active_slot(new.start_time).flags & ~MANAGED_FLAGS))
+                for new in self.slots
             )
         )
 
@@ -198,5 +220,5 @@ def parse_mode(value: str) -> SlotMode:
 
 
 def same_behaviour(a: DayPlan, b: DayPlan) -> bool:
-    """Same slot starts, SoC targets and modes (power and unmanaged flags aside)."""
-    return [(x.start, x.soc, x.mode) for x in a.slots] == [(x.start, x.soc, x.mode) for x in b.slots]
+    """Same slot starts, SoC targets and modes (power and unmanaged flags aside), in any order."""
+    return sorted((x.start, x.soc, x.mode) for x in a.slots) == sorted((x.start, x.soc, x.mode) for x in b.slots)

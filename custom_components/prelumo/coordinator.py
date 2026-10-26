@@ -427,6 +427,17 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             return read
         return w
 
+    def _planner_order(self, plan: DayPlan | None, now: datetime) -> DayPlan | None:
+        """The inverter schedule listed the way the planner wrote it.
+
+        The inverter keeps the slots from the earliest start (it wraps only from slot 6 to 1),
+        the planner from the hour of the write: slot 1 then, the last slot the tail, rolls due
+        from ROLL_SLOT on. With no write in the last day, listed from the slot running now."""
+        if plan is None:
+            return None
+        last = dt_util.as_local(self.guard.history[-1]) if self.guard.history else None
+        return plan.rolled_from(last if last is not None and now - last < timedelta(days=1) else now)
+
     def _wrote(self, plan: DayPlan, now: datetime) -> None:
         self._written, self._written_at = plan, now
 
@@ -646,7 +657,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         ps.stale_sources = stale
         ps.computed_at = now
         ps.hours = hours
-        current = io.read_current_plan(self.hass, self.inv)
+        current = self._planner_order(io.read_current_plan(self.hass, self.inv), now)
         hours_stale = int(o[OPT_STALE_HOURS])
 
         if stale:

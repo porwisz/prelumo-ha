@@ -92,3 +92,35 @@ def test_parsers():
     assert parse_flags("Sprzedaz (32)") == 32
     assert parse_flags("Siec (1)") == 1
     assert parse_flags("33") == 33
+
+
+def test_service_data_crosses_midnight_only_from_slot_6_to_1():
+    """The inverter wraps only from slot 6 to slot 1: a rolling plan (slot 1 = the hour it
+    was made) is written from its earliest start, as the same schedule."""
+    rolling = DayPlan.from_lists([2100, 300, 600, 800, 1800, 2000], [10000] * 6,
+                                 [50, 80, 30, 20, 20, 20], [1, 1, 32, 0, 32, 0])
+    data = rolling.to_service_data()
+    assert data["start"] == [300, 600, 800, 1800, 2000, 2100]
+    assert data["soc"] == [80, 30, 20, 20, 20, 50]
+    assert data["flagi"] == [1, 32, 0, 32, 0, 1]
+    written = DayPlan.from_lists(data["start"], data["moc"], data["soc"], data["flagi"])
+    for t in (time(22, 30), time(2, 0), time(4, 0), time(19, 0)):
+        assert written.active_slot(t) == rolling.active_slot(t)
+
+
+def test_rolled_from_restores_the_planner_order():
+    written = DayPlan.from_lists([300, 600, 800, 1800, 2000, 2100], [10000] * 6,
+                                 [80, 30, 20, 20, 20, 50], [1, 32, 0, 32, 0, 1])
+    rolled = written.rolled_from(datetime(2026, 10, 26, 21, 5))
+    assert [s.start for s in rolled.slots] == [2100, 300, 600, 800, 1800, 2000]
+    assert rolled.active_index(datetime(2026, 10, 27, 9, 0)) == 3  # four slots in: roll due soon
+
+
+def test_merge_and_compare_ignore_slot_order():
+    from core.plan import same_behaviour
+    rolling = plan(start=[2000, 2100, 700, 1300, 1600, 1900])
+    asc = rolling.ascending()
+    assert same_behaviour(rolling, asc)
+    keep = asc.with_slot(0, Slot(asc.slots[0].start, 12000, asc.slots[0].soc, asc.slots[0].flags | 2))
+    merged = rolling.merge_preserved_flags(keep)
+    assert merged.active_slot(time(7, 30)).flags & 2  # the 07:00 slot keeps its bit, wherever listed
