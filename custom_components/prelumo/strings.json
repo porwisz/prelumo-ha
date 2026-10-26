@@ -217,6 +217,9 @@
       },
       "alert_charge": {
         "name": "Emergency charge"
+      },
+      "clock_drift": {
+        "name": "Inverter clock wrong"
       }
     },
     "select": {
@@ -277,6 +280,10 @@
     "write_failed": {
       "title": "Prelumo: schedule write failed",
       "description": "Writing to the inverter failed: {error}"
+    },
+    "clock_drift": {
+      "title": "Prelumo: inverter clock is off",
+      "description": "The inverter clock shows {inverter}, {minutes} min off Home Assistant time. The inverter switches the schedule slots by its own clock, so they run at the wrong hours. Set the time on the inverter (e.g. after a DST change)."
     }
   },
   "exceptions": {

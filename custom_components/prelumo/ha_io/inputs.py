@@ -49,6 +49,22 @@ def state_age(hass: HomeAssistant, entity_id: str | None) -> timedelta | None:
     return dt_util.utcnow() - st.last_updated
 
 
+def clock_drift(hass: HomeAssistant, entity_id: str | None) -> timedelta | None:
+    """Inverter clock minus HA wall-clock time at the moment the clock was read.
+
+    Compared as wall-clock (no zone): the inverter keeps local time, so after a DST change
+    a clock that was not moved shows up here as a whole hour. ``last_reported`` is the read
+    time even when the reading did not change (a stopped clock drifts on)."""
+    st = hass.states.get(entity_id) if entity_id else None
+    if st is None or st.state in BAD:
+        return None
+    inv = dt_util.parse_datetime(st.state)
+    if inv is None:
+        return None
+    seen = dt_util.as_local(st.last_reported).replace(tzinfo=None, microsecond=0)
+    return inv.replace(tzinfo=None) - seen
+
+
 def _kw_factor(st: State | None) -> float:
     unit = (st.attributes.get("unit_of_measurement") if st else None) or "W"
     return {"W": 0.001, "kW": 1.0, "MW": 1000.0}.get(unit, 0.001)
@@ -101,6 +117,10 @@ class InverterEntities:
     @property
     def house_total(self) -> str:
         return self.s("suma_dom")
+
+    @property
+    def clock(self) -> str:
+        return self.s("zegar")  # inverter's own clock, "YYYY-MM-DD HH:MM:SS" local, no zone
 
     @property
     def max_sell_power(self) -> str:

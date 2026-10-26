@@ -24,7 +24,7 @@ from .const import (
     CONF_MODE_SELECT, CONF_MODE_ZERO_EXPORT, CONF_OUTAGE_CALENDAR, CONF_OUTAGE_ENTITY,
     CONF_OUTAGE_THRESHOLD,
     CONF_RCE_TODAY, CONF_RCE_TOMORROW, CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW, CONF_WEATHER,
-    CONF_WRITE_ACTION, DEFAULTS, DOMAIN, ISSUE_STALE_DATA, ISSUE_WRITE_FAILED, OPT_AFTERNOON_SUMMER,
+    CLOCK_DRIFT_MAX, CONF_WRITE_ACTION, DEFAULTS, DOMAIN, ISSUE_CLOCK_DRIFT, ISSUE_STALE_DATA, ISSUE_WRITE_FAILED, OPT_AFTERNOON_SUMMER,
     OPT_AFTERNOON_WINTER, OPT_CAPACITY, OPT_EFFICIENCY, OPT_EV_CAPACITY, OPT_EV_CHARGER_KW, OPT_EV_CHEAP_ONLY,
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
@@ -66,6 +66,11 @@ class PrelumoData:
     export_blocked: bool = False  # sell price at or below the block threshold right now
     desired_mode: str | None = None  # work mode Prelumo wants (also computed in shadow mode)
     mode_action: str | None = None  # what happened: set / unchanged / shadow / auto_off / outage
+    clock_drift: timedelta | None = None  # inverter clock minus HA time; None = clock not read
+
+    @property
+    def clock_wrong(self) -> bool:
+        return self.clock_drift is not None and abs(self.clock_drift) > CLOCK_DRIFT_MAX
 
 
 @dataclass(frozen=True)
@@ -132,6 +137,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.ev_power_seen: float | None = None  # kW, last measured EV charging power
         self.shadow = True
         self.auto_mode = True
+        self._clock_drift_min: int | None = None  # drift (min) of the open clock issue
         # learned models
         self.pv_bias = PvBias()
         self.ev_pattern = EvPattern()
@@ -384,6 +390,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 self.hass, self.async_replan(), f"{DOMAIN}_alert_changed"
             )
         self._maybe_recover(now)
+        data.clock_drift = io.clock_drift(self.hass, self.inv.clock)
+        self._check_clock(data)
         self._track_grid_energy(plan, now, data.soc)
         self._track_stock(now, data.soc)
         if plan is not None:
@@ -756,6 +764,34 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.guard.record(now)
         self._wrote(new, now)
         ps.last_write = now
+
+    @callback
+    def _check_clock(self, data: PrelumoData) -> None:
+        """Warn while the inverter clock is off: it runs the slots by its own time (26 Oct:
+        an hour behind after the DST change, so the 20:00 slot ran until 22:00)."""
+        if not data.clock_wrong:
+            if self._clock_drift_min is not None and data.clock_drift is not None:
+                ir.async_delete_issue(self.hass, DOMAIN, ISSUE_CLOCK_DRIFT)
+                persistent_notification.async_dismiss(self.hass, f"{DOMAIN}_clock")
+                self._clock_drift_min = None
+            return
+        minutes = round(data.clock_drift.total_seconds() / 60)
+        if minutes == self._clock_drift_min:
+            return
+        inverter = (dt_util.now() + data.clock_drift).strftime("%H:%M")
+        ir.async_create_issue(
+            self.hass, DOMAIN, ISSUE_CLOCK_DRIFT, is_fixable=False, severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_CLOCK_DRIFT,
+            translation_placeholders={"minutes": f"{minutes:+d}", "inverter": inverter},
+        )
+        if self._clock_drift_min is None:
+            persistent_notification.async_create(
+                self.hass,
+                f"Zegar falownika ({inverter}) różni się od czasu HA o {minutes:+d} min. "
+                "Falownik przełącza sloty harmonogramu według swojego zegara — ustaw czas na falowniku.",
+                title="Prelumo", notification_id=f"{DOMAIN}_clock",
+            )
+        self._clock_drift_min = minutes
 
     def _raise_stale(self, stale: list[str]) -> None:
         names = ", ".join(stale)

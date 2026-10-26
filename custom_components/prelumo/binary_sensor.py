@@ -20,7 +20,7 @@ async def async_setup_entry(
     c = entry.runtime_data
     async_add_entities([
         SellNow(c, "sell_now"), GridOutage(c, "grid_outage"), FallbackActive(c, "fallback_active"),
-        FullChargeDue(c, "full_charge_due"), EmergencyCharge(c, "alert_charge"),
+        FullChargeDue(c, "full_charge_due"), EmergencyCharge(c, "alert_charge"), ClockDrift(c, "clock_drift"),
     ])
 
 
@@ -77,3 +77,20 @@ class EmergencyCharge(PrelumoEntity, BinarySensorEntity):
                 self.coordinator.planned_outage.isoformat() if self.coordinator.planned_outage else None
             ),
         }
+
+
+class ClockDrift(PrelumoEntity, BinarySensorEntity):
+    """On while the inverter clock is more than 5 min off HA time (slots switch at wrong hours)."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    @property
+    def is_on(self) -> bool | None:
+        d = self.coordinator.data
+        return d.clock_wrong if d and d.clock_drift is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        d = self.coordinator.data
+        drift = d.clock_drift if d else None
+        return {"drift_min": round(drift.total_seconds() / 60, 1) if drift is not None else None}

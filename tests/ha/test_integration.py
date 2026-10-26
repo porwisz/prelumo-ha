@@ -347,3 +347,29 @@ async def test_stored_sell_prices_older_than_the_window_are_dropped(hass: HomeAs
     fresh = dt_util.now().replace(minute=0, second=0, microsecond=0)
     back = coord._load_sell_seen({old.isoformat(): 0.5, fresh.isoformat(): 0.9, "nonsense": 1.0})
     assert back == {fresh: 0.9}
+
+
+async def test_inverter_clock_off_raises_a_warning(hass: HomeAssistant, setup) -> None:
+    """The inverter runs the slots by its own clock: an hour off (a missed DST change) is
+    reported, a clock set right clears it, and a missing clock entity says nothing."""
+    from homeassistant.helpers import issue_registry as ir
+    entry, _ = setup
+    coord = entry.runtime_data
+    issues = ir.async_get(hass)
+    assert hass.states.get("binary_sensor.prelumo_clock_drift").state == "unknown"  # no clock entity
+
+    behind = dt_util.now() - timedelta(hours=1)
+    hass.states.async_set(f"{P}zegar", behind.strftime("%Y-%m-%d %H:%M:%S"))
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert round(coord.data.clock_drift.total_seconds() / 60) == -60
+    st = hass.states.get("binary_sensor.prelumo_clock_drift")
+    assert st.state == "on" and st.attributes["drift_min"] == pytest.approx(-60, abs=0.1)
+    issue = issues.async_get_issue(DOMAIN, "clock_drift")
+    assert issue is not None and issue.translation_placeholders["minutes"] == "-60"
+
+    hass.states.async_set(f"{P}zegar", (dt_util.now() + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S"))
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get("binary_sensor.prelumo_clock_drift").state == "off"  # within 5 min
+    assert issues.async_get_issue(DOMAIN, "clock_drift") is None

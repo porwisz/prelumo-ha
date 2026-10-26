@@ -158,3 +158,7 @@ SERVICE_REPLAN: Final = "replan"
 
 ISSUE_STALE_DATA: Final = "stale_data"
 ISSUE_WRITE_FAILED: Final = "write_failed"
+ISSUE_CLOCK_DRIFT: Final = "clock_drift"
+
+# the inverter switches slots by its own clock: warn when it is this far from HA time
+CLOCK_DRIFT_MAX: Final = timedelta(minutes=5)

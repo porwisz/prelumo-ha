@@ -218,6 +218,9 @@
       },
       "alert_charge": {
         "name": "Ładowanie awaryjne"
+      },
+      "clock_drift": {
+        "name": "Zły zegar falownika"
       }
     },
     "select": {
@@ -278,6 +281,10 @@
     "write_failed": {
       "title": "Prelumo: zapis harmonogramu nieudany",
       "description": "Zapis do falownika nie powiódł się: {error}"
+    },
+    "clock_drift": {
+      "title": "Prelumo: zegar falownika się rozjechał",
+      "description": "Zegar falownika pokazuje {inverter}, czyli {minutes} min różnicy względem czasu Home Assistant. Falownik przełącza sloty harmonogramu według swojego zegara, więc działają o złych godzinach. Ustaw czas na falowniku (np. po zmianie czasu)."
     }
   },
   "exceptions": {
