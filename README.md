@@ -11,7 +11,7 @@ Prelumo nie rozmawia z Modbusem — korzysta wyłącznie z encji i akcji HA
 
 ```
 co 30 s   odczyt harmonogramu → aktywny slot → tryb pracy (Export First tylko w slocie Sell)
-co godz.  prognozy → optymalizator godzinowy na cały horyzont (36 h, DP po SoC)
+co 10 min prognozy → optymalizator godzinowy na cały horyzont (36 h, DP po SoC)
           → sloty kroczące: sloty 1–5 = kolejne odcinki planu godzinowego (bez ściskania
             całej doby do 6 slotów), slot 6 = bezpieczny ogon do końca doby
           → porównanie z falownikiem → zapis tylko gdy: falownik doszedł do 5. slotu

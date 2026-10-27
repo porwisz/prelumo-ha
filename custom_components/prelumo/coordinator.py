@@ -29,7 +29,7 @@ from .const import (
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_ALERT_LEAD, OPT_ALERT_SOC, OPT_ARBITRAGE_MARGIN, OPT_BATTERY_FIRST, OPT_BLOCK_EXPORT_PRICE, OPT_FORCE_SELL_PRICE, OPT_RESERVE_MARGIN, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_PV_TRUST, OPT_SELL_MIN_POWER, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTE, SLOT_WINDOW_H,
+    OPT_ALERT_LEAD, OPT_ALERT_SOC, OPT_ARBITRAGE_MARGIN, OPT_BATTERY_FIRST, OPT_BLOCK_EXPORT_PRICE, OPT_FORCE_SELL_PRICE, OPT_RESERVE_MARGIN, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_PV_TRUST, OPT_SELL_MIN_POWER, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTES, SLOT_WINDOW_H,
     STORAGE_VERSION, UPDATE_INTERVAL,
 )
 from .core.balance import FULL_SOC, FullChargeTracker
@@ -317,7 +317,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             except Exception as err:  # noqa: BLE001 - recorder may not be ready
                 _LOGGER.debug("Full-charge history lookup failed: %s", err)
         self._unsub.append(
-            async_track_time_change(self.hass, self._hourly, minute=PLAN_MINUTE, second=0)
+            async_track_time_change(self.hass, self._scheduled, minute=list(PLAN_MINUTES), second=0)
         )
 
     async def async_shutdown(self) -> None:
@@ -547,7 +547,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self._last_recover = now
         self.config_entry.async_create_background_task(self.hass, self.async_replan(), f"{DOMAIN}_recover")
 
-    async def _hourly(self, _now: datetime) -> None:
+    async def _scheduled(self, _now: datetime) -> None:
         await self.async_replan()
 
     # --- planning ----------------------------------------------------------

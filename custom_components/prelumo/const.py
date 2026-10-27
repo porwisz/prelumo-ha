@@ -11,7 +11,7 @@ TAGLINE: Final = "Prelumo — one step ahead of the sun"
 PLATFORMS: Final = ["sensor", "binary_sensor", "select", "switch", "time", "number", "button"]
 
 UPDATE_INTERVAL: Final = timedelta(seconds=30)
-PLAN_MINUTE: Final = 3  # hourly re-plan at HH:03
+PLAN_MINUTES: Final = (3, 13, 23, 33, 43, 53)  # re-plan every 10 min, first at HH:03
 # The 6 slots are a 24 h clock face the inverter repeats every day, so they are built from and
 # judged on the next 24 h: every hour a slot will run in is planned. A shorter window left the
 # hours past its end unplanned, and each re-plan found a "broken" hour entering at the edge.

@@ -60,10 +60,13 @@ kWh/h · koszt w zł (ujemny = zarobek)
           {
             type: "heading", heading: "Harmonogram falownika", icon: "mdi:calendar-clock",
             badges: [{
+              type: "button", icon: "mdi:refresh", text: "Przelicz plan",
+              tap_action: { action: "perform-action", perform_action: "prelumo.replan", data: { write: false } },
+            }, {
               type: "button", icon: "mdi:upload", text: "Zapisz plan teraz", color: "orange",
               tap_action: {
-                action: "perform-action", perform_action: "prelumo.replan", data: { write: true },
-                confirmation: { text: "Przeliczyć plan i od razu zapisać harmonogram do falownika? (pomija limity zapisów; nie zapisze, jeśli plan się nie zmienił)" },
+                action: "perform-action", perform_action: "prelumo.apply_plan", data: { source: "proposed" },
+                confirmation: { text: "Zapisać do falownika plan pokazany w kolumnie „Prelumo proponuje”? (bez przeliczania; pomija limity zapisów)" },
               },
             }],
           },
