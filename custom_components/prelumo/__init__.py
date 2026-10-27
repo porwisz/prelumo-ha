@@ -19,7 +19,7 @@ from .const import (
     DOMAIN, PLATFORMS, SERVICE_APPLY_PLAN, SERVICE_READ_PLAN, SERVICE_REPLAN, SERVICE_SET_SLOT,
 )
 from .coordinator import PrelumoCoordinator
-from .dashboard import async_remove_dashboard, async_setup_dashboard
+from .dashboard import async_register_frontend, async_remove_dashboard, async_setup_dashboard
 from .core.plan import MAX_POWER_W, DayPlan, PlanError, Slot, SlotMode
 from .ha_io.inputs import read_current_plan
 
@@ -65,6 +65,8 @@ def _hhmm(t: time) -> int:
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    await async_register_frontend(hass, entry_version(hass))
+
     async def apply_plan(call: ServiceCall) -> None:
         coord = _coordinator(hass)
         try:

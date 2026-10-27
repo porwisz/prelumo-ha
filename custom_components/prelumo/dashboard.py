@@ -101,14 +101,25 @@ class _PrelumoLovelace:
         raise HomeAssistantError("The Prelumo dashboard is removed with the integration")
 
 
-async def async_setup_dashboard(hass: HomeAssistant, coord: Any, version: str) -> None:
-    """Serve the strategy module and register the sidebar panel. Never fails the setup."""
+async def async_register_frontend(hass: HomeAssistant, version: str) -> None:
+    """Serve the strategy module. Called from async_setup, before the slow entry setup: a page
+    loaded in between would have no module, and the panel registered later times out waiting for
+    ll-strategy-dashboard-prelumo. Never fails the setup."""
+    if hass.data.get(_REGISTERED):
+        return
     try:
-        if not hass.data.get(_REGISTERED):
-            path = Path(__file__).parent / "frontend"
-            await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(path), False)])
-            frontend.add_extra_js_url(hass, f"{STATIC_URL}/{JS_FILE}?v={version}")
-            hass.data[_REGISTERED] = True
+        path = Path(__file__).parent / "frontend"
+        await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(path), False)])
+        frontend.add_extra_js_url(hass, f"{STATIC_URL}/{JS_FILE}?v={version}")
+        hass.data[_REGISTERED] = True
+    except Exception:  # noqa: BLE001 - the dashboard is optional, planning must keep running
+        _LOGGER.exception("Prelumo dashboard module could not be registered")
+
+
+async def async_setup_dashboard(hass: HomeAssistant, coord: Any, version: str) -> None:
+    """Register the sidebar panel (the module is served by async_register_frontend). Never fails the setup."""
+    try:
+        await async_register_frontend(hass, version)
         from homeassistant.components.lovelace.const import LOVELACE_DATA
 
         data = hass.data.get(LOVELACE_DATA)
