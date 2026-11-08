@@ -90,6 +90,11 @@ def hour_setting(
         # the battery has energy - floor at min SoC, not at the forecast trajectory (a higher
         # real load would otherwise be bought at this price)
         return Setting(HourMode.NORMAL, p.min_soc)
+    if p is not None and p.safe_soc > 0 and h.soc_end < h.soc_start:
+        # safe level: kept by the plan (charging, no use planned below it), not by the slot - a
+        # slot that uses the battery keeps the low floor, so without the grid the inverter can
+        # still run the house from the battery
+        return Setting(HourMode.NORMAL, p.min_soc)
     return Setting(HourMode.NORMAL, h.soc_floor)
 
 
@@ -157,7 +162,7 @@ def simulate(
             if h.sell <= 0:
                 # hard rule: no Export First where the RCE price is unknown (or not positive)
                 cost += broke("sell_without_price")
-            if target < p.min_soc / 100 * cap + reserve[i] - 0.5 * max(1, p.soc_step) / 100 * cap:
+            if reserve[i] > 1e-9 and target < p.house_floor / 100 * cap + reserve[i] - 0.5 * max(1, p.soc_step) / 100 * cap:
                 # hard rule (reserve), independent of the forecast SoC: a sell slot may never
                 # sell below what the house needs in the following expensive hours
                 cost += broke("sell_below_reserve")
@@ -225,7 +230,7 @@ def simulate(
         cost += hour_cost
         traj.append(soc / cap * 100)
         if risk:  # objective only (slot merging): reserve for a cloudy expensive run
-            cost += risk_cost(risks[i + 1], soc - p.min_soc / 100 * cap)
+            cost += risk_cost(risks[i + 1], max(0.0, soc - p.house_floor / 100 * cap))
         if detail is not None:
             detail.append({
                 "start": h.start.isoformat(), "mode": st.mode.value, "floor": st.soc,

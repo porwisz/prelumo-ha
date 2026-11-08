@@ -745,3 +745,65 @@ def test_full_charge_tops_up_over_two_cheap_hours():
     viol: list[str] = []
     _, traj = simulate(hrs, [hour_setting(h) for h in r.hours], 80, p, violations=viol)
     assert max(traj[:4]) > 99.95 and "full_charge_missing" not in viol
+
+
+
+def _safe(**kw):
+    from dataclasses import replace
+    return replace(P, **{"soc_step": 2, "min_sell_soc": 22, "sell_min_power_kw": 0, "safe_soc": 40, **kw})
+
+
+def test_safe_level_house_never_drains_below_it():
+    # expensive evening, nothing to sell: without the safe level the battery covers it to min SoC
+    hrs = day(G13_BUY, [0.0] * 24)
+    off = optimize(hrs, 60, _safe(safe_soc=0), Strategy.MAX_GRID_TRADING)
+    on = optimize(hrs, 60, _safe(), Strategy.MAX_GRID_TRADING)
+    assert min(h.soc_end for h in off.hours) < 40
+    assert all(h.soc_end >= 40 for h in on.hours)
+
+
+def test_safe_level_sale_dips_below_and_battery_comes_back():
+    sell = [0.3] * 24
+    sell[19] = 3.0
+    hrs = day(G13_BUY, sell)
+    p = _safe()
+    r = optimize(hrs, 60, p, Strategy.MAX_GRID_TRADING)
+    assert r.hours[19].mode is HourMode.SELL
+    assert r.hours[19].soc_end < 40  # the spike is worth the dip
+    assert all(h.soc_end >= 22 for h in r.hours)
+    for h in r.hours:  # below the safe level only a sale discharges the battery
+        if h.soc_end < h.soc_start and h.soc_end < 40:
+            assert h.mode is HourMode.SELL
+    assert r.hours[-1].soc_end >= 40  # refilled in the cheap night hours
+    segs, _ = compress(r.hours, hrs, 60, p)
+    plan = to_day_plan(segs, hrs, p)
+    assert any(s.mode is SlotMode.SELL and 22 <= s.soc < 40 for s in plan.slots)
+    _, traj = simulate(hrs, [s.setting for s in segs for _ in range(s.length)], 60, p)
+    assert traj[-1] >= 40 - 1
+
+
+def test_safe_level_is_kept_by_charging_not_by_slot_floors():
+    # cheap afternoon before an expensive evening: the plan charges so the evening ends at the
+    # safe level, but the slots that use the battery keep the low floor (backup without grid)
+    from dataclasses import replace
+    buy = [0.6] * 15 + [1.4] * 6 + [0.6] * 3
+    hrs = day(buy, [0.0] * 24, load=[0.5] * 15 + [1.5] * 6 + [0.5] * 3)
+    p = replace(_safe(), battery_first_above=0.6)
+    r = optimize(hrs, 40, p, Strategy.SELF_CONSUMPTION)
+    assert any(h.mode is HourMode.GRID_CHARGE for h in r.hours[:15])
+    assert all(h.soc_end >= 40 for h in r.hours)
+    segs, _ = compress(r.hours, hrs, 40, p)
+    use = [s for s in segs if s.setting.mode is HourMode.NORMAL
+           and any(r.hours[k].soc_end < r.hours[k].soc_start for k in range(s.start, s.start + s.length))]
+    assert use and all(s.setting.soc == p.min_soc for s in use)
+    _, traj = simulate(hrs, [s.setting for s in segs for _ in range(s.length)], 40, p)
+    assert min(traj[15:21]) >= 40 - 2
+
+
+def test_safe_level_small_spread_does_not_dip():
+    # a sale worth little does not pay for staying below the safe level until the night
+    sell = [0.3] * 24
+    sell[17] = 0.75
+    hrs = day([0.6] * 24, sell)
+    r = optimize(hrs, 40, _safe(), Strategy.MAX_GRID_TRADING)
+    assert all(h.soc_end >= 40 for h in r.hours)

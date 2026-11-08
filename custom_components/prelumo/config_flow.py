@@ -21,7 +21,7 @@ from .const import (
     OPT_EV_CHEAP_ONLY, OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_ALERT_LEAD, OPT_ALERT_SOC, OPT_ARBITRAGE_MARGIN, OPT_BATTERY_FIRST, OPT_BLOCK_EXPORT_PRICE, OPT_FORCE_SELL_PRICE, OPT_RESERVE_MARGIN, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_PV_TRUST, OPT_SELL_MIN_POWER, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS,
+    OPT_ALERT_LEAD, OPT_ALERT_SOC, OPT_ARBITRAGE_MARGIN, OPT_BATTERY_FIRST, OPT_BLOCK_EXPORT_PRICE, OPT_FORCE_SELL_PRICE, OPT_RESERVE_MARGIN, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_PV_TRUST, OPT_SAFE_SOC, OPT_SELL_LOAD_MARGIN, OPT_SELL_MIN_POWER, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS,
 )
 from .core.plan import PlanError
 from .core.planner import parse_fallback_plan
@@ -166,6 +166,8 @@ class PrelumoOptionsFlow(OptionsFlow):
                 errors[OPT_FALLBACK_PLAN] = "invalid_plan"
             if user_input[OPT_MIN_SOC] >= user_input[OPT_MAX_SOC]:
                 errors[OPT_MIN_SOC] = "invalid_soc_range"
+            if not user_input[OPT_MIN_SOC] <= user_input[OPT_SAFE_SOC] < user_input[OPT_MAX_SOC]:
+                errors[OPT_SAFE_SOC] = "invalid_safe_soc"
             if not errors:
                 return self.async_create_entry(data=user_input)
         o = {**OPTION_DEFAULTS, **self.config_entry.options, **(user_input or {})}
@@ -192,6 +194,8 @@ class PrelumoOptionsFlow(OptionsFlow):
             req(OPT_PRICE_OFF): _num(0, 5, 0.001, "PLN/kWh"),
             req(OPT_MAX_CHARGE_PRICE): _num(0, 5, 0.001, "PLN/kWh"),
             req(OPT_MIN_SELL_SOC): _num(0, 100, 1, "%"),
+            req(OPT_SAFE_SOC): _num(0, 100, 1, "%"),
+            req(OPT_SELL_LOAD_MARGIN): _num(0, 200, 5, "%"),
             req(OPT_SELL_MIN_POWER): _num(0, 20, 0.1, "kW"),
             req(OPT_FORCE_SELL_PRICE): _num(0, 10, 0.01, "PLN/kWh"),
             req(OPT_BLOCK_EXPORT_PRICE): _num(-1, 5, 0.01, "PLN/kWh"),

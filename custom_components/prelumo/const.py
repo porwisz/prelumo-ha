@@ -11,7 +11,7 @@ TAGLINE: Final = "Prelumo — one step ahead of the sun"
 PLATFORMS: Final = ["sensor", "binary_sensor", "select", "switch", "time", "number", "button"]
 
 UPDATE_INTERVAL: Final = timedelta(seconds=30)
-PLAN_MINUTES: Final = (3, 13, 23, 33, 43, 53)  # re-plan every 10 min, first at HH:03
+PLAN_MINUTES: Final = tuple(range(3, 60, 5))  # re-plan every 5 min, first at HH:03
 # The 6 slots are a 24 h clock face the inverter repeats every day, so they are built from and
 # judged on the next 24 h: every hour a slot will run in is planned. A shorter window left the
 # hours past its end unplanned, and each re-plan found a "broken" hour entering at the edge.
@@ -91,6 +91,8 @@ OPT_FALLBACK_PLAN: Final = "fallback_plan"
 OPT_STALE_HOURS: Final = "stale_hours"
 OPT_MAX_CHARGE_PRICE: Final = "max_grid_charge_price"
 OPT_MIN_SELL_SOC: Final = "min_sell_soc"
+OPT_SAFE_SOC: Final = "safe_soc"
+OPT_SELL_LOAD_MARGIN: Final = "sell_load_margin"
 OPT_SELL_MIN_POWER: Final = "sell_min_power_kw"
 OPT_PV_TRUST: Final = "pv_trust"
 OPT_MIN_GAIN: Final = "min_gain"
@@ -134,6 +136,8 @@ OPTION_DEFAULTS: Final = {
     OPT_STALE_HOURS: 6,
     OPT_MAX_CHARGE_PRICE: 0.0,  # 0 = lowest G13 price
     OPT_MIN_SELL_SOC: 20,
+    OPT_SELL_LOAD_MARGIN: 20,  # %; house above the forecast by this while selling limits the sale
+    OPT_SAFE_SOC: 40,  # %; long-run level kept with the safe-level switch on
     OPT_PV_TRUST: 50,  # %; PV forecast share trusted for the house reserve in expensive hours
     OPT_SELL_MIN_POWER: 6.0,  # kW; a sell slot caps ALL battery output (house too) at its power
     OPT_MIN_GAIN: 0.5,

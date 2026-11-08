@@ -28,6 +28,10 @@ SELL_THEN_BUY_KWH = 0.15  # kWh the house may buy in a sell hour after its floor
 HOLD_COST = 0.002  # PLN per kWh above min SoC per hour
 HIGH_SOC = 90  # %
 HIGH_SOC_HOLD_COST = 0.01  # PLN per kWh above HIGH_SOC per hour
+# Objective only: each kWh below the safe level costs this per hour - a sale may dip below it
+# when it pays, but the battery is brought back (PV surplus or the next cheap grid hours) soon
+SAFE_DEBT_COST = 0.05  # PLN per kWh below safe_soc per hour
+SAFE_DEBT_END_HOURS = 12  # the end of the horizon below the safe level counts this many hours
 # Above this SoC the grid never rounds the BMS taper away: half a 2 % step is the whole slow
 # last % (22 Oct: 99 % at 15:15, planned full by 16:00 - the BMS needed ~75 min more)
 TAPER_STRICT_FROM = 98  # %
@@ -82,10 +86,19 @@ class BatteryParams:
     # BMS charge taper: (from SoC %, max battery-side kW) - the last % charge slowly (measured
     # on the Deye: 99 -> 100 % takes ~30 min)
     charge_taper: tuple[tuple[int, float], ...] = ((90, 5.5), (95, 3.0), (98, 1.5), (99, 0.5))
+    # Safe level (%, 0 = off): kept for the long run by the plan - charged ahead, no house use
+    # planned below it; only a sale may go lower (down to ``min_sell_soc``), then it is refilled.
+    # Planning only: the slots that use the battery keep min SoC (backup when the grid is down).
+    safe_soc: int = 0
 
     @property
     def eta(self) -> float:
         return self.roundtrip_efficiency**0.5
+
+    @property
+    def house_floor(self) -> int:
+        """Lowest SoC the battery discharges to for the house: the safe level when it is on."""
+        return max(self.min_soc, min(self.safe_soc, self.max_soc)) if self.safe_soc > 0 else self.min_soc
 
 
 @dataclass(frozen=True)
@@ -196,8 +209,10 @@ def topping_entry(s0: int, s1: int, p: BatteryParams) -> bool:
 
 def hold_cost(soc: float, p: BatteryParams) -> float:
     """Objective-only cost (PLN) of keeping the battery at ``soc`` % for one hour."""
+    floor = p.house_floor
     return (p.capacity_kwh / 100) * (
-        HOLD_COST * max(0.0, soc - p.min_soc) + HIGH_SOC_HOLD_COST * max(0.0, soc - HIGH_SOC))
+        HOLD_COST * max(0.0, soc - floor) + HIGH_SOC_HOLD_COST * max(0.0, soc - HIGH_SOC)
+        + SAFE_DEBT_COST * max(0.0, floor - soc))
 
 
 def force_sell(h: HourInput, p: BatteryParams) -> bool:
@@ -245,7 +260,7 @@ def pv_risk(hours: list[HourInput], p: BatteryParams) -> list[tuple[float, float
     if p.battery_first_above is None or p.pv_trust >= 1.0:
         return out
     thr = p.battery_first_above + 1e-9
-    room = (p.max_soc - p.min_soc) / 100 * p.capacity_kwh
+    room = (p.max_soc - p.house_floor) / 100 * p.capacity_kwh
     for t in range(1, len(hours)):
         if hours[t].buy > thr and hours[t - 1].buy <= thr:
             need, k = 0.0, t
@@ -257,7 +272,7 @@ def pv_risk(hours: list[HourInput], p: BatteryParams) -> list[tuple[float, float
 
 
 def risk_cost(risk: tuple[float, float] | None, stored_kwh: float) -> float:
-    """Price of the reserve shortfall (``stored_kwh``: battery energy above min SoC)."""
+    """Price of the reserve shortfall (``stored_kwh``: battery energy above the house floor)."""
     if risk is None:
         return 0.0
     need, price = risk
@@ -295,7 +310,7 @@ def _transition(
 
     # Expensive hour + battery-first: the battery covers the house fully (down to min SoC)
     if p.battery_first_above is not None and h.buy > p.battery_first_above + 1e-9:
-        if bus > 0 and s0 > p.min_soc and base_deficit > EPS:
+        if bus > 0 and s0 > p.house_floor and base_deficit > EPS:
             return None  # charging while the house would buy at this price
         # at a high enough sell price the battery exports instead of covering the house
         if bus <= 0 and not force_sell(h, p):
@@ -304,7 +319,7 @@ def _transition(
             # SoC-grid rounding either way: a shortfall below one step is bought (the inverter
             # really covers it from the battery). Only rounding up would waste up to a step
             # every expensive hour and make cheap-hour charging for the house look unprofitable.
-            if s1 > p.min_soc and delivered < need - step_kwh - EPS:
+            if s1 > p.house_floor and delivered < need - step_kwh - EPS:
                 return None
             over = delivered - need
             if EPS < over <= step_kwh + EPS:  # SoC-grid rounding, never a "sale"
@@ -328,8 +343,10 @@ def _transition(
         battery_export = 0.0
     if battery_export > EPS and (strategy is Strategy.SELF_CONSUMPTION or not may_export or s1 < p.min_sell_soc):
         return None
-    if battery_export > EPS and (s1 - p.min_soc) / 100 * p.capacity_kwh < reserve - 1e-9:
+    if battery_export > EPS and reserve > 1e-9 and (s1 - p.house_floor) / 100 * p.capacity_kwh < reserve - 1e-9:
         return None  # keep energy for the house in the coming expensive hours
+    if delta < 0 and s1 < p.house_floor and battery_export <= EPS:
+        return None  # below the safe level the battery covers nothing but a sale
     if battery_export > EPS and deficit > EPS:
         # A sell slot discharges at its power (never below sell_min_power) until its floor; then
         # the battery stops covering the house, which buys for the rest of the hour. So a sale
@@ -377,13 +394,15 @@ def optimize(
     step = max(1, p.soc_step)
     lo, hi = p.min_soc, p.max_soc
     # every % above TAPER_STRICT_FROM: the slow last % are planned without rounding
-    grid = sorted(set(range(lo, hi + 1, step)) | {hi} | set(range(max(lo, TAPER_STRICT_FROM), hi + 1)))
+    grid = sorted(set(range(lo, hi + 1, step)) | {hi, p.house_floor}
+                  | set(range(max(lo, TAPER_STRICT_FROM), hi + 1)))
     start_soc = int(round(min(hi, max(lo, soc_now))))
     if terminal_price is None:
         terminal_price = min(h.buy for h in hours) * p.eta
     # terminal value: energy left in battery is worth something tomorrow
     def term(s: int) -> float:
-        return -(s - lo) / 100 * p.capacity_kwh * terminal_price
+        debt = SAFE_DEBT_COST * SAFE_DEBT_END_HOURS * max(0, p.house_floor - s) / 100 * p.capacity_kwh
+        return -(s - lo) / 100 * p.capacity_kwh * terminal_price + debt
 
     def hold(s: int) -> float:
         return hold_cost(s, p)
@@ -438,7 +457,7 @@ def optimize(
                         nf = next_full(full, s0, s1, t, h)
                         # hurdle (objective only): selling grid-charged energy must earn the margin
                         hurdle = p.arbitrage_min_margin * st.battery_export if tainted else 0.0
-                        rk = risk_cost(risk[t + 1], (s1 - lo) / 100 * p.capacity_kwh)
+                        rk = risk_cost(risk[t + 1], max(0, s1 - p.house_floor) / 100 * p.capacity_kwh)
                         v = st.cost + hurdle + hold(s1) + rk + V[t + 1][(s1, nt, nf)]
                         if best is None or v < best[0]:
                             best = (v, s1, nt, nf, st)
@@ -465,7 +484,7 @@ def optimize(
         notes.append("grid_import_limit_exceeded")
     if track_full:
         notes.append("full_charge_planned" if full == FULL_DONE else "full_charge_not_possible_in_horizon")
-    return OptimizeResult(plan, total, -term(s_), strategy, arbitrage, notes)
+    return OptimizeResult(plan, total, (s_ - lo) / 100 * p.capacity_kwh * terminal_price, strategy, arbitrage, notes)
 
 
 def simulate_baseline(hours: list[HourInput], soc_now: float, params: BatteryParams) -> float:

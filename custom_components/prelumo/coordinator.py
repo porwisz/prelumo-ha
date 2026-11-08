@@ -29,7 +29,7 @@ from .const import (
     OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
     OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
     OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_ALERT_LEAD, OPT_ALERT_SOC, OPT_ARBITRAGE_MARGIN, OPT_BATTERY_FIRST, OPT_BLOCK_EXPORT_PRICE, OPT_FORCE_SELL_PRICE, OPT_RESERVE_MARGIN, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_PV_TRUST, OPT_SELL_MIN_POWER, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTES, SLOT_WINDOW_H,
+    OPT_ALERT_LEAD, OPT_ALERT_SOC, OPT_ARBITRAGE_MARGIN, OPT_BATTERY_FIRST, OPT_BLOCK_EXPORT_PRICE, OPT_FORCE_SELL_PRICE, OPT_RESERVE_MARGIN, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_PV_TRUST, OPT_SAFE_SOC, OPT_SELL_LOAD_MARGIN, OPT_SELL_MIN_POWER, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTES, SLOT_WINDOW_H,
     STORAGE_VERSION, UPDATE_INTERVAL,
 )
 from .core.balance import FULL_SOC, FullChargeTracker
@@ -41,6 +41,7 @@ from .core.forecast.pv import PvBias
 from .core.optimizer import BatteryParams, Strategy
 from .core.plan import SLOT_COUNT, DayPlan, PlanError, Slot, SlotMode, same_behaviour
 from .core.planner import PlannerInputs, PlannerResult, horizon_hours, parse_fallback_plan, run_planner
+from .core.sell_guard import LoadMeter, SellBoost, boost_sell_load
 from .core.shadow import ShadowLedger, energy_cost
 from .core.stock import MAX_TICK_KWH, BatteryStock, account_tick
 from .core.taper import STALL_BAND, charge_events, merge_events, taper_from_events
@@ -99,6 +100,7 @@ class PlanState:
     heat_pump: list[float] = field(default_factory=list)
     hours: list[datetime] = field(default_factory=list)
     error: str | None = None
+    sell_boost: SellBoost | None = None  # running sale re-planned with the measured house draw
 
 
 def _range(text: str) -> tuple[int, int]:
@@ -131,6 +133,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         # runtime controls (restored by entities)
         self.strategy = Strategy.SELF_CONSUMPTION
         self.arbitrage = False
+        self.safe_level = False  # keep the battery at the safe level (sales may dip below)
+        self.sell_load_guard = False  # house above the forecast while selling limits the sale
+        self.load_meter = LoadMeter()  # house draw without the EV, last minutes
         self.grid_energy: bool | None = None  # battery holds energy bought from the grid
         self.alert_on = False  # weather warning now active
         self.planned_outage: datetime | None = None  # start of the next announced outage
@@ -218,6 +223,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             soc_step=int(o[OPT_SOC_STEP]),
             max_grid_charge_price=None if alert else self.max_grid_charge_price(),
             min_sell_soc=int(o[OPT_MIN_SELL_SOC]),
+            # an alert charge needs no safe level: it fills the battery anyway
+            safe_soc=int(o.get(OPT_SAFE_SOC, 40)) if self.safe_level and alert is None else 0,
             charge_taper=self.charge_taper(),
             sell_min_power_kw=float(o.get(OPT_SELL_MIN_POWER, 6.0)),
             pv_trust=float(o.get(OPT_PV_TRUST, 50)) / 100,
@@ -394,6 +401,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self._check_clock(data)
         self._track_grid_energy(plan, now, data.soc)
         self._track_stock(now, data.soc)
+        self._sample_house(now)
         if plan is not None:
             data.active_index = plan.active_index(now)
             data.next_change, _ = plan.next_change(now)
@@ -416,6 +424,29 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                     data.mode_action = "error"
                     _LOGGER.warning("Work mode change failed: %s", err)
         return data
+
+    @callback
+    def _sample_house(self, now: datetime) -> None:
+        """House draw without the EV (the forecast's load: house + heat pump) for the sell guard."""
+        house = io.power_kw(self.hass, self.inv.house)
+        if house is None:
+            return
+        ev = io.power_kw(self.hass, self.conf.get(CONF_EV_POWER)) or 0.0
+        self.load_meter.add(now, house - max(0.0, ev))
+
+    def _sell_boost(
+        self, now: datetime, hours: list[datetime], current: DayPlan | None, base: list[float], hp: list[float],
+    ) -> tuple[list[float], SellBoost | None]:
+        """Base load with the running sale's hours at the measured draw, when the guard is on."""
+        if not self.sell_load_guard or current is None or (self.data and self.data.export_blocked):
+            return base, None
+        selling = [current.active_slot(now if i == 0 else h).mode is SlotMode.SELL for i, h in enumerate(hours)]
+        margin = float(self.opt.get(OPT_SELL_LOAD_MARGIN, 20)) / 100
+        out, boost = boost_sell_load(base, hp, selling, self.load_meter.mean_kw(now), margin)
+        if boost is not None:
+            _LOGGER.info("House %.2f kW above the forecast %.2f kW while selling: sale re-planned (%d h)",
+                         boost.measured_kw, boost.forecast_kw, boost.hours)
+        return out, boost
 
     def _mode_plan(self, read: DayPlan, now: datetime) -> DayPlan:
         """The plan the work mode follows: the written one until the read-back matches it."""
@@ -657,6 +688,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         ps.stale_sources = stale
         ps.computed_at = now
         ps.hours = hours
+        ps.sell_boost = None
         current = self._planner_order(io.read_current_plan(self.hass, self.inv), now)
         hours_stale = int(o[OPT_STALE_HOURS])
 
@@ -685,6 +717,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         temps = await io.read_weather_temps(self.hass, c.get(CONF_WEATHER))
         hp = self.hp_model.predict(hours, temps) if self.hp_model.coef or self.hp_model.dhw else [0.0] * horizon
         ev = await self._ev_forecast(now, hours, [b + h for b, h in zip(base, hp)])
+        base, ps.sell_boost = self._sell_boost(now, hours, current, base, hp)
         outage = self.data.outage if self.data else False
         if outage:
             ev.battery_allowed = [True] * len(hours)

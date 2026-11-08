@@ -70,6 +70,12 @@ def _kw_factor(st: State | None) -> float:
     return {"W": 0.001, "kW": 1.0, "MW": 1000.0}.get(unit, 0.001)
 
 
+def power_kw(hass: HomeAssistant, entity_id: str | None) -> float | None:
+    """A power sensor's state in kW (W / kW / MW by its unit), None when unavailable."""
+    v = state_float(hass, entity_id)
+    return None if v is None else v * _kw_factor(hass.states.get(entity_id))
+
+
 # --- inverter ------------------------------------------------------------
 class InverterEntities:
     def __init__(self, prefix: str) -> None:

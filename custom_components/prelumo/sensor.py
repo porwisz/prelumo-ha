@@ -64,6 +64,12 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "grid_arbitrage": c.arbitrage,
         "max_grid_charge_price": round(c.max_grid_charge_price(), 3),
         "min_sell_soc": int(c.opt["min_sell_soc"]),
+        "safe_level": c.safe_level,
+        "safe_soc": int(c.opt.get("safe_soc", 40)),
+        "sell_load_guard": c.sell_load_guard,
+        "sell_boost": None if ps.sell_boost is None else {
+            "measured_kw": ps.sell_boost.measured_kw, "forecast_kw": ps.sell_boost.forecast_kw,
+            "hours": ps.sell_boost.hours},
         "battery_first_in_expensive_hours": bool(c.opt["battery_first_in_expensive_hours"]),
         "reserve_margin": int(c.opt["reserve_margin"]),
         "pv_trust": int(c.opt.get("pv_trust", 50)),

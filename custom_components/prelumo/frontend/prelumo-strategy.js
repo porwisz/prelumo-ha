@@ -152,6 +152,7 @@ function decisionsView(E, I) {
           tile(E.strategy, "Strategia", 12, { features: [{ type: "select-options" }] }),
           tile(E.auto_mode, "Sterowanie"), tile(E.shadow_mode, "Tryb cienia"),
           tile(E.grid_arbitrage, "Arbitraż"), tile(E.fallback_active, "Plan awaryjny"),
+          tile(E.safe_level, "Bezpieczny poziom"), tile(E.sell_load_guard, "Limit sprzedaży przy zużyciu"),
           tile(E.expected_savings, "Oszczędność"), tile(E.shadow_savings, "Suma w cieniu"),
           tile(E.battery_energy_cost, "Koszt energii w baterii"),
           tile(E.self_sufficiency, "Autarkia 30 dni"), tile(E.battery_cycles, "Cykle baterii"),

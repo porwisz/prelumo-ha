@@ -229,7 +229,7 @@ def rule_breaks(
                 broke.append("sell_in_self_consumption")
             if slot.soc < params.min_sell_soc:
                 broke.append("sell_below_min_soc")
-            if slot.soc < params.min_soc + res / params.capacity_kwh * 100 - half_step:
+            if res > 1e-9 and slot.soc < params.house_floor + res / params.capacity_kwh * 100 - half_step:
                 broke.append("sell_below_expensive_reserve")
         if (slot.mode is SlotMode.GRID_CHARGE and params.max_grid_charge_price is not None
                 and h.buy > params.max_grid_charge_price + 1e-9):

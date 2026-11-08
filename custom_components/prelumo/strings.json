@@ -126,7 +126,9 @@
           "force_sell_price": "Forced sell price",
           "block_export_price": "Export block price",
           "alert_soc": "Emergency charge SoC",
-          "alert_lead_hours": "Lead time before an outage"
+          "alert_lead_hours": "Lead time before an outage",
+          "safe_soc": "Safe level",
+          "sell_load_margin": "Higher use that limits selling"
         },
         "data_description": {
           "fallback_plan": "6 entries 'HH:MM SOC MODE' separated by ';', mode: none | grid_charge | sell",
@@ -143,14 +145,17 @@
           "force_sell_price": "Above this RCE price the battery sells past the reserve for the expensive hours - the house then buys from the grid, because the sale earns more. 0 = off.",
           "block_export_price": "At or below this RCE price Prelumo never selects Export First - checked live every 30 s, also when the plan is old. No price for the hour blocks exporting too.",
           "alert_soc": "Prelumo charges the battery to this level on a weather warning and before an announced outage - with no charge price cap and no battery-first rule. 0 = off.",
-          "alert_lead_hours": "How many hours before an announced outage starts the battery should already be charged."
+          "alert_lead_hours": "How many hours before an announced outage starts the battery should already be charged.",
+          "safe_soc": "With the Safe level switch on, the plan keeps the battery at this level for the long run: it charges ahead (PV or cheap hours) so the forecast use ends here and plans no house use below it; only a sale may go lower (down to min SoC when selling), and the battery is then refilled. The slots that use the battery keep the low floor (min SoC), so without the grid the inverter can still run on the battery.",
+          "sell_load_margin": "With the Limit selling on higher use switch on: while a sell slot runs and the house (without the EV) draws more than the forecast by this much (mean of the last 15 min), the plan is recalculated with the measured draw for the hours of that sale - it sells less (a higher floor) or stops, so the house does not buy after the sale."
         }
       }
     },
     "error": {
       "invalid_hours": "Use 'start-end', e.g. 7-13",
       "invalid_plan": "Backup plan is invalid (6 slots, cyclic order)",
-      "invalid_soc_range": "Min SoC must be below max SoC"
+      "invalid_soc_range": "Min SoC must be below max SoC",
+      "invalid_safe_soc": "Safe level must be between min SoC and max SoC"
     }
   },
   "entity": {
@@ -248,6 +253,12 @@
       },
       "grid_arbitrage": {
         "name": "Grid arbitrage"
+      },
+      "safe_level": {
+        "name": "Safe level"
+      },
+      "sell_load_guard": {
+        "name": "Limit selling on higher use"
       }
     },
     "time": {

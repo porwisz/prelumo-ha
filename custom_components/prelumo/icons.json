@@ -69,6 +69,12 @@
       },
       "grid_arbitrage": {
         "default": "mdi:swap-horizontal"
+      },
+      "safe_level": {
+        "default": "mdi:shield-half-full"
+      },
+      "sell_load_guard": {
+        "default": "mdi:transmission-tower-export"
       }
     }
   },

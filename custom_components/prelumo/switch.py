@@ -1,4 +1,4 @@
-"""Switches: automatic control, shadow mode, grid arbitrage (all restored)."""
+"""Switches: automatic control, shadow mode, grid arbitrage, safe level, sell guard (all restored)."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ SWITCHES = {
     "auto_mode": ("auto_mode", True, False),
     "shadow_mode": ("shadow", True, True),
     "grid_arbitrage": ("arbitrage", False, True),
+    "safe_level": ("safe_level", False, True),
+    "sell_load_guard": ("sell_load_guard", False, True),
 }
 
 
