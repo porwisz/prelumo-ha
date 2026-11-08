@@ -82,6 +82,7 @@ kWh/h · koszt w zł (ujemny = zarobek)
           tile(I.grid_power, "Sieć"), tile(I.house, "Dom"),
           tile(I.mode_select, "Tryb pracy", 12, { features: [{ type: "select-options" }] }),
           tile(E.auto_mode, "Sterowanie Prelumo"), tile(E.sell_now, "Sprzedaż teraz"),
+          tile(E.safe_level, "Bezpieczny poziom"), tile(E.sell_load_guard, "Limit sprzedaży przy zużyciu"),
           { type: "heading", heading: "Ostatnie 24 h", heading_style: "subtitle", icon: "mdi:chart-line" },
           { type: "history-graph", hours_to_show: 24, entities: [{ entity: I.soc, name: "SoC", color: "green" }], grid_options: { columns: "full", rows: 3 } },
           {
