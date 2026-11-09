@@ -41,6 +41,8 @@ CONF_ALERT_ENTITY: Final = "alert_entity"
 CONF_OUTAGE_CALENDAR: Final = "outage_calendar"
 CONF_OUTAGE_ENTITY: Final = "outage_entity"
 CONF_OUTAGE_THRESHOLD: Final = "outage_threshold"
+CONF_DHW_CLIMATE: Final = "dhw_climate"
+CONF_DHW_TEMP: Final = "dhw_temperature"
 
 DEFAULT_PREFIX: Final = "deye_falownik"
 DEFAULT_WRITE_ACTION: Final = "esphome.deye_modbus_zapisz_harmonogram"
@@ -53,6 +55,8 @@ DEFAULTS: Final = {
     CONF_SOLCAST_TODAY: "sensor.solcast_pv_forecast_prognoza_na_dzisiaj",
     CONF_SOLCAST_TOMORROW: "sensor.solcast_pv_forecast_prognoza_na_jutro",
     CONF_HP_POWER: "sensor.sprsun_silnik_moc",
+    CONF_DHW_CLIMATE: "climate.sprsun_woda_uzytkowa_cwu",
+    CONF_DHW_TEMP: "sensor.sprsun_temperatura_wody_uzytkowej",
     CONF_EV_SOC: "sensor.testowe_tesla_ble_904d3c_battery",
     CONF_EV_LIMIT: "number.testowe_tesla_ble_904d3c_charging_limit",
     CONF_EV_PLUGGED: "binary_sensor.testowe_tesla_ble_904d3c_charger",
@@ -107,6 +111,7 @@ OPT_ALERT_SOC: Final = "alert_soc"
 OPT_ALERT_LEAD: Final = "alert_lead_hours"
 OPT_RCE_ESTIMATE: Final = "rce_estimate_share"
 OPT_PV_LOW: Final = "pv_pessimistic"
+OPT_DHW_BOOSTS: Final = "dhw_boosts"
 
 OPTION_DEFAULTS: Final = {
     OPT_CAPACITY: 20.0,
@@ -156,6 +161,9 @@ OPTION_DEFAULTS: Final = {
     OPT_RCE_ESTIMATE: 70,
     # house reserve counts on Solcast's pessimistic forecast (pv_estimate10) when it is there
     OPT_PV_LOW: True,
+    # hot water boosts: 'HH:00-HH:00 target after [peak]' - heat the tank to target once inside
+    # the window, then keep `after`; 'peak' = only on days with expensive zones
+    OPT_DHW_BOOSTS: "03:00-07:00 50 40; 13:00-16:00 53 40 peak",
 }
 
 # --- runtime switches / select (restored state) ------------------------

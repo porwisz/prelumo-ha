@@ -4,6 +4,23 @@
 const md = (content, extra = {}) => ({ type: "markdown", content, grid_options: { columns: "full" }, ...extra });
 const tile = (entity, name, columns = 6, extra = {}) => ({ type: "tile", entity, name, grid_options: { columns }, ...extra });
 
+const dhwTable = (S) => `{%- set bs = state_attr('${S}','boosts') or [] -%}
+{%- macro hm(t) -%}{{ as_timestamp(t) | timestamp_custom('%a %H:%M') if t else '–' }}{%- endmacro -%}
+{%- if not bs -%}
+Brak podbić CWU w horyzoncie planu (albo CWU nie jest skonfigurowane: ⋮ → Zmień konfigurację).
+{%- else -%}
+| Okno | Cel | Energia | Najtańszy start | Zwykle | W planie baterii | Oszczędność |
+|:--|--:|--:|:--|:--|:--|--:|
+{% for b in bs -%}
+| {{ b.window }} | {{ b.target | round(0) | int }} °C | {{ '%.1f' % b.kwh }} kWh | **{{ hm(b.best_start) }}** | {{ hm(b.usual_start) }} | {{ hm(b.planned_start) }} | {{ ('%.2f zł' % b.saving_vs_usual) if b.saving_vs_usual is not none else '–' }} |
+{% endfor %}
+{% for b in bs -%}
+{{ b.window }}: {% for k, v in (b.extra_cost_by_start or {}).items() %}{{ k }} {{ '+%.2f zł' % v }}{{ ' · ' if not loop.last }}{% endfor %}
+
+{% endfor -%}
+Zasobnik {{ state_attr('${S}','temperature') }} °C · {{ state_attr('${S}','kwh_per_degree') }} kWh/°C{{ '' if state_attr('${S}','learned') else ' (wartość domyślna, jeszcze nie wyuczona)' }} · {{ state_attr('${S}','heating_power_kw') }} kW · sterowanie Prelumo: **{{ 'tak' if state_attr('${S}','control') else 'nie (tylko podgląd)' }}**
+{%- endif -%}`;
+
 function planView(E, I) {
   const P = E.proposed_plan, A = E.active_slot;
   const slots = `{%- set ic = {'none':'🏠','grid_charge':'🔌','sell':'💰'} -%}
@@ -174,6 +191,8 @@ function decisionsView(E, I) {
           tile(E.pv_forecast_corrected, "PV 24 h (skoryg.)", 4), tile(E.load_forecast, "Zużycie 24 h", 4),
           tile(E.ev_energy_needed, "Auto potrzebuje", 4),
           tile(E.forecast_accuracy, "Błąd prognozy zużycia (7 dni)", 4),
+          { type: "heading", heading: "Ciepła woda (CWU)", icon: "mdi:water-boiler" },
+          md(dhwTable(E.dhw_plan)),
           { type: "history-graph", hours_to_show: 72, entities: [{ entity: E.expected_savings, name: "Oczekiwana oszczędność" }], grid_options: { columns: "full", rows: 3 } },
         ],
       },

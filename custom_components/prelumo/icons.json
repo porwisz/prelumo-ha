@@ -39,6 +39,9 @@
       },
       "forecast_accuracy": {
         "default": "mdi:bullseye-arrow"
+      },
+      "dhw_plan": {
+        "default": "mdi:water-boiler"
       }
     },
     "binary_sensor": {

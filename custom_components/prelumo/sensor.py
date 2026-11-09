@@ -245,6 +245,11 @@ SENSORS: tuple[PrelumoSensorDescription, ...] = (
         attrs=lambda c: {**_series(c, c.plan_state.pv), "bias": c.pv_bias.factors},
     ),
     PrelumoSensorDescription(
+        # the cheapest start of the next hot water boost; the boosts and their costs in the attributes
+        key="dhw_plan", device_class=SensorDeviceClass.TIMESTAMP,
+        value=lambda c: c.dhw.next_start(), attrs=lambda c: c.dhw.attrs(),
+    ),
+    PrelumoSensorDescription(
         # hourly error of the consumption forecast (house + heat pump), % of the metered energy
         key="forecast_accuracy", native_unit_of_measurement=PERCENTAGE, suggested_display_precision=1,
         state_class=SensorStateClass.MEASUREMENT,

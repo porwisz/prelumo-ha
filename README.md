@@ -148,6 +148,27 @@ poniżej tej ceny RCE sprzedaż traci pieniądze.
   obowiązuje. Status: `binary_sensor.prelumo_alert_charge` (atrybuty `reason`, `target_soc`,
   `hours_left`, `planned_outage`).
 
+### Ciepła woda (CWU) — podbicia jako odbiornik przesuwalny
+
+Pompa ciepła grzejąca CWU w godzinie, w której bateria sprzedaje, zabiera kWh, które poszłyby do
+sieci po cenie RCE. Prelumo traktuje podbicie CWU jak ładunek, który można przesunąć w oknie:
+
+- **Konfiguracja**: ⋮ → Zmień konfigurację → „CWU (encja climate zasobnika)” i „Temperatura zasobnika
+  CWU”; w opcjach **Podbicia CWU**: `HH:00-HH:00 cel potem [peak]`, kolejne po `;`
+  (domyślnie `03:00-07:00 50 40; 13:00-16:00 53 40 peak` — `peak` = tylko w dni robocze).
+- **Nauka** (z historii temperatury zasobnika i mocy pompy, 10 dni, potem pamiętane 45 dni): każdy
+  wzrost temperatury zasobnika to jedno grzanie; z nich kWh/°C, moc pompy przy CWU, zwykła godzina
+  i temperatura startu każdego podbicia oraz profil pozostałych dogrzań. Model ogrzewania uczy się
+  już bez energii CWU.
+- **Plan**: dla każdej dozwolonej godziny startu optymalizator baterii liczony jest z podbiciem w tej
+  godzinie; wygrywa najtańsza (przy remisie najpóźniejsza, wybór zmienia się dopiero przy zysku
+  > 0,05 zł). Podbicie kończy się w oknie.
+- **`sensor.prelumo_dhw_plan`** — stan: najtańszy start najbliższego podbicia; atrybut `boosts`:
+  okno, energia, `best_start`, `usual_start` (kiedy podbicie zwykle startuje), `planned_start`
+  (gdzie liczy je plan baterii), `saving_vs_usual`, `extra_cost_by_start`.
+- W tej wersji Prelumo **tylko podgląda**: podbicia nadal uruchamiają Twoje automatyzacje, plan
+  baterii liczy je w zwykłej godzinie, a sensor pokazuje, ile dałoby przesunięcie.
+
 ### Strategie
 - **Autokonsumpcja** — bateria nigdy nie oddaje do sieci; może ładować się z sieci w strefie
   pozaszczytowej, jeśli to obniża koszt.

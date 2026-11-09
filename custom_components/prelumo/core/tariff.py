@@ -60,6 +60,10 @@ class G13Tariff:
             return Zone.AFTERNOON_PEAK
         return Zone.OFF_PEAK
 
+    def peak_day(self, d: date) -> bool:
+        """A day with expensive zones (a working day)."""
+        return d.weekday() < 5 and d not in polish_holidays(d.year)
+
     def off_peak_by_clock(self, dt: datetime) -> bool:
         """Off-peak by the hour alone, the same every day - what a car's own charging schedule
         (e.g. Tesla "off-peak" hours) follows; it knows nothing of weekends or holidays."""

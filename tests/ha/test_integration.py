@@ -402,3 +402,47 @@ async def test_day_forecast_is_kept_and_judged_the_next_day(hass: HomeAssistant,
         assert day["load_act"] == len(hours) and "pv_err" in day
     else:
         assert "load_act" not in day
+
+
+async def test_hot_water_boosts_are_planned_and_reported(hass: HomeAssistant, recorder_mock) -> None:
+    """With a tank configured the plan carries the boosts as flexible loads and the sensor shows
+    the best start of each, its energy and what it saves against the usual hour."""
+    _seed(hass)
+    hass.states.async_set("climate.tank", "auto", {"current_temperature": 41.0, "temperature": 40})
+    hass.states.async_set("sensor.tank_temp", "41.0", {"unit_of_measurement": "°C"})
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={
+        "inverter_prefix": "deye_falownik", "write_action": "esphome.deye_modbus_zapisz_harmonogram",
+        "mode_select": "select.deye_falownik_ust_tryb_pracy", "mode_export_first": "Export First",
+        "mode_zero_export": "Zero Export To CT",
+        "rce_today": "sensor.rce_pse_price", "solcast_today": "sensor.solcast_pv_forecast_prognoza_na_dzisiaj",
+        "outage_entity": DEFAULTS["outage_entity"], "outage_threshold": 180.0,
+        "dhw_climate": "climate.tank", "dhw_temperature": "sensor.tank_temp",
+    }, options={**OPTION_DEFAULTS, "dhw_boosts": "03:00-07:00 50 40; 13:00-16:00 53 40"})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    coord = entry.runtime_data
+    assert coord.dhw.configured and not coord.dhw.controlled()
+    st = hass.states.get("sensor.prelumo_dhw_plan")
+    boosts = st.attributes["boosts"]
+    assert [b["window"] for b in boosts] in (["03:00-07:00", "13:00-16:00"], ["13:00-16:00", "03:00-07:00"])
+    for b in boosts:
+        assert b["kwh"] > 0 and b["best_start"] and b["planned_start"] == b["usual_start"]
+        assert b["extra_cost_by_start"] and min(b["extra_cost_by_start"].values()) == 0
+    assert st.state not in ("unknown", "unavailable")
+    assert len(coord.plan_state.result.flex) == 2
+    # the tank reaches the target inside a window: that window is done for the day
+    now = dt_util.now().replace(hour=14, minute=10)
+    hass.states.async_set("sensor.tank_temp", "52.6", {"unit_of_measurement": "°C"})
+    assert coord.dhw.tick(now) and coord.dhw.done == {"13-16": now.date().isoformat()}
+    assert not coord.dhw.tick(now)
+    loads = coord.dhw.loads(now, [now.replace(minute=0) + timedelta(hours=i) for i in range(36)])
+    afternoon = next(f for f in loads if f.key == "13-16")
+    assert afternoon.candidates[0] >= 23  # tomorrow's window
+
+
+async def test_no_hot_water_entity_means_no_boosts(hass: HomeAssistant, setup) -> None:
+    entry, _ = setup
+    coord = entry.runtime_data
+    assert not coord.dhw.configured and coord.plan_state.result.flex == []
+    assert hass.states.get("sensor.prelumo_dhw_plan").attributes["boosts"] == []

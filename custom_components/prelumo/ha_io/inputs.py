@@ -396,6 +396,14 @@ async def soc_history(
     return out
 
 
+async def power_history(
+    hass: HomeAssistant, entity_id: str, start: datetime, end: datetime
+) -> list[tuple[datetime, float]]:
+    """(time, kW) state changes of a power sensor, oldest first (raw history)."""
+    factor = _kw_factor(hass.states.get(entity_id))
+    return [(t, v * factor) for t, v in await soc_history(hass, entity_id, start, end)]
+
+
 async def ev_sessions(
     hass: HomeAssistant, plugged_entity: str | None, ev_energy: dict[datetime, float],
     start: datetime, end: datetime,

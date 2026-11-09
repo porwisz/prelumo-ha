@@ -27,7 +27,9 @@
           "outage_entity": "Wskaźnik awarii sieci (napięcie lub binary sensor)",
           "outage_threshold": "Awaria poniżej napięcia",
           "alert_entity": "Ostrzeżenia pogodowe (MeteoAlarm / IMGW)",
-          "outage_calendar": "Kalendarz zapowiedzianych wyłączeń"
+          "outage_calendar": "Kalendarz zapowiedzianych wyłączeń",
+          "dhw_climate": "CWU (encja climate zasobnika)",
+          "dhw_temperature": "Temperatura zasobnika CWU"
         }
       },
       "ev": {
@@ -67,7 +69,9 @@
           "write_action": "Akcja zapisu harmonogramu",
           "mode_select": "Encja trybu pracy",
           "alert_entity": "Ostrzeżenia pogodowe (MeteoAlarm / IMGW)",
-          "outage_calendar": "Kalendarz zapowiedzianych wyłączeń"
+          "outage_calendar": "Kalendarz zapowiedzianych wyłączeń",
+          "dhw_climate": "CWU (encja climate zasobnika)",
+          "dhw_temperature": "Temperatura zasobnika CWU"
         }
       }
     },
@@ -130,7 +134,8 @@
           "safe_soc": "Bezpieczny poziom",
           "sell_load_margin": "Wyższe zużycie ograniczające sprzedaż",
           "pv_pessimistic": "Rezerwa domu wg pesymistycznej prognozy Solcast",
-          "rce_estimate_share": "Nieopublikowane ceny RCE jako część zwykłej ceny"
+          "rce_estimate_share": "Nieopublikowane ceny RCE jako część zwykłej ceny",
+          "dhw_boosts": "Podbicia CWU"
         },
         "data_description": {
           "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell",
@@ -152,7 +157,8 @@
           "safe_soc": "Przy włączonym przełączniku „Bezpieczny poziom” plan długoterminowo utrzymuje baterię na tym poziomie: doładowuje ją z wyprzedzeniem (PV albo tanie godziny), tak by prognozowane zużycie kończyło się na nim, i nie planuje zużycia domu poniżej niego. Niżej może zejść tylko sprzedaż (do min. SoC przy sprzedaży), a potem bateria jest doładowywana. Sloty, w których bateria jest używana, mają niski limit (min SoC), więc bez sieci falownik dalej może pracować z baterii.",
           "sell_load_margin": "Przy włączonym przełączniku „Ograniczaj sprzedaż przy wyższym zużyciu”: gdy trwa slot sprzedaży, a dom (bez EV) pobiera więcej niż prognoza o tyle procent (średnia z ostatnich 15 min), plan jest przeliczany ze zmierzonym poborem dla godzin tej sprzedaży - sprzedaje mniej (wyższy limit) albo przestaje, żeby dom nie kupował prądu po sprzedaży.",
           "pv_pessimistic": "Gdy Solcast podaje pv_estimate10, rezerwa na drogie godziny liczy na tę prognozę złego dnia zamiast stałego procentu prognozy.",
-          "rce_estimate_share": "Godziny bez opublikowanej ceny RCE (jutro, przed ok. 14:00) liczone są jako ten procent mediany ceny z tej samej godziny w ostatnich dniach — plan może zostawić na nie energię. 0 = brak przychodu w takich godzinach. Eksport zawsze wymaga prawdziwej ceny."
+          "rce_estimate_share": "Godziny bez opublikowanej ceny RCE (jutro, przed ok. 14:00) liczone są jako ten procent mediany ceny z tej samej godziny w ostatnich dniach — plan może zostawić na nie energię. 0 = brak przychodu w takich godzinach. Eksport zawsze wymaga prawdziwej ceny.",
+          "dhw_boosts": "Jedno podbicie na wpis, oddzielone ';': 'HH:00-HH:00 cel potem [peak]'. Raz w oknie zasobnik jest grzany do celu, potem trzymana jest temperatura 'potem'. 'peak' = tylko w dni robocze (drogie strefy). Przykład: 03:00-07:00 50 40; 13:00-16:00 53 40 peak"
         }
       }
     },
@@ -160,7 +166,8 @@
       "invalid_hours": "Podaj 'od-do', np. 7-13",
       "invalid_plan": "Plan awaryjny jest niepoprawny (6 slotów, kolejność w kółko)",
       "invalid_soc_range": "Min SoC musi być mniejszy niż max SoC",
-      "invalid_safe_soc": "Bezpieczny poziom musi być między min SoC a max SoC"
+      "invalid_safe_soc": "Bezpieczny poziom musi być między min SoC a max SoC",
+      "invalid_dhw_boosts": "Wpisy 'HH:00-HH:00 cel potem [peak]' oddzielone ';' (pełne godziny, 10 ≤ potem ≤ cel ≤ 70)."
     }
   },
   "entity": {
@@ -213,6 +220,9 @@
       },
       "forecast_accuracy": {
         "name": "Błąd prognozy zużycia (7 dni)"
+      },
+      "dhw_plan": {
+        "name": "CWU: najlepszy start podbicia"
       }
     },
     "binary_sensor": {

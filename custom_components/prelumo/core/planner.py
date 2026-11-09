@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from .compress import CAP_PENALTY, Segment, battery_held, rolling, settings_from_plan, simulate, to_day_plan
 from .diff import URGENT_HOURS, RuleCheck, rule_check
+from .flex import FlexLoad, Placement, place
 from .forecast.ev import EvForecast
 from .optimizer import (
     FULL_CHARGE_PENALTY,
@@ -44,6 +45,10 @@ class PlannerInputs:
     sell_estimate: dict[datetime, float] = field(default_factory=dict)
     # PV on a bad day (kWh/h, corrected); hours left out trust ``pv_trust`` of the forecast
     pv_low: dict[datetime, float] = field(default_factory=dict)
+    # loads Prelumo may place in time (hot water boosts, ...) and the keys of those it starts
+    # itself - the others are counted at their usual hour, the best start is only reported
+    flex: list[FlexLoad] = field(default_factory=list)
+    flex_controlled: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -77,6 +82,7 @@ class PlannerResult:
     # listed apart, not in slot_plan_issues or the cost, and left out of the rule comparison
     tail_issues: list[str] = field(default_factory=list)
     tail_from: int | None = None
+    flex: list[Placement] = field(default_factory=list)  # where each flexible load is best run
     _ctx: tuple | None = field(default=None, repr=False)
 
     def evaluate_current(self, current: DayPlan | None) -> None:
@@ -181,6 +187,19 @@ def run_planner(
 ) -> PlannerResult:
     hours = horizon_hours(inp.now, inp.horizon_h)
     hin, missing = build_hours(inp, hours)
+    placements: list[Placement] = []
+    if inp.flex:
+        def with_extra(extra: list[float]) -> list[HourInput]:
+            return [replace(h, load=h.load + x) if x > 0 else h for h, x in zip(hin, extra)]
+
+        def evaluate(extra: list[float]) -> float:
+            r = optimize(with_extra(extra), inp.soc, params, strategy, arbitrage, grid_energy=inp.grid_energy)
+            return r.total_cost - r.terminal_value
+
+        frac = 1 - (inp.now - hours[0]).total_seconds() / 3600
+        extra, placements = place(inp.flex, evaluate, len(hin), frac if 0 < frac < 1 else 1.0,
+                                  lambda key: key in inp.flex_controlled)
+        hin = with_extra(extra)
     window = max(6, min(inp.window_h, 24, len(hin)))
     full_by = window if inp.full_by_h is None else max(1, min(window, inp.full_by_h))
     opt = optimize(hin, inp.soc, params, strategy, arbitrage, grid_energy=inp.grid_energy,
@@ -209,7 +228,7 @@ def run_planner(
     res = PlannerResult(plan, hin, opt, segs, slot_cost, base, missing, notes, None,
                         slot_hourly, [], slot_cost - _penalties(slot_issues), slot_issues,
                         slot_costs=slot_costs(plan, day, slot_hourly),
-                        tail_issues=tail_issues, tail_from=tail,
+                        tail_issues=tail_issues, tail_from=tail, flex=placements,
                         _ctx=(day, inp.soc, params, strategy, inp.grid_energy))
     res.evaluate_current(current)
     return res

@@ -63,8 +63,9 @@ async def learn_models(coord: PrelumoCoordinator, now: datetime) -> None:
     coord.load_profile = LoadProfile(base_load_samples(house, hp, ev))
     temps = await io.hourly_mean_temp(coord.hass, c.get(CONF_WEATHER), start, end)
     coord.hp_model = HeatPumpModel(float(o[OPT_HP_BASE_TEMP]))
-    if hp and temps:
-        coord.hp_model.fit(hp, temps)
+    await coord.dhw.learn(now)
+    if hp and temps:  # hot water runs are forecast apart (dhw.py): the model learns heating only
+        coord.hp_model.fit(coord.dhw.heating_only(hp, now), temps)
     sessions = await io.ev_sessions(coord.hass, c.get(CONF_EV_PLUGGED), ev, start, end)
     if sessions:
         coord.ev_pattern = EvPattern.learn(sessions, weeks)

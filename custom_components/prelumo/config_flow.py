@@ -11,6 +11,8 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_ALERT_ENTITY,
+    CONF_DHW_CLIMATE,
+    CONF_DHW_TEMP,
     CONF_EV_CALENDAR,
     CONF_EV_LIMIT,
     CONF_EV_MANUAL_READY,
@@ -47,6 +49,7 @@ from .const import (
     OPT_BATTERY_FIRST,
     OPT_BLOCK_EXPORT_PRICE,
     OPT_CAPACITY,
+    OPT_DHW_BOOSTS,
     OPT_EFFICIENCY,
     OPT_EV_CAPACITY,
     OPT_EV_CHARGER_KW,
@@ -86,6 +89,7 @@ from .const import (
     OPT_WEAR,
     OPTION_DEFAULTS,
 )
+from .core.dhw import DhwError, parse_boosts
 from .core.plan import PlanError
 from .core.planner import parse_fallback_plan
 
@@ -114,6 +118,8 @@ def _source_fields() -> dict[str, selector.EntitySelector]:
         CONF_SOLCAST_TOMORROW: _ent("sensor"),
         CONF_WEATHER: _ent("weather"),
         CONF_HP_POWER: _ent("sensor"),
+        CONF_DHW_CLIMATE: _ent("climate"),
+        CONF_DHW_TEMP: _ent("sensor"),
         CONF_OUTAGE_ENTITY: _ent(["sensor", "binary_sensor"]),
         CONF_ALERT_ENTITY: _ent(["binary_sensor", "sensor"]),
         CONF_OUTAGE_CALENDAR: _ent("calendar"),
@@ -227,6 +233,10 @@ class PrelumoOptionsFlow(OptionsFlow):
                 parse_fallback_plan(user_input[OPT_FALLBACK_PLAN])
             except (PlanError, ValueError):
                 errors[OPT_FALLBACK_PLAN] = "invalid_plan"
+            try:
+                parse_boosts(user_input[OPT_DHW_BOOSTS])
+            except DhwError:
+                errors[OPT_DHW_BOOSTS] = "invalid_dhw_boosts"
             if user_input[OPT_MIN_SOC] >= user_input[OPT_MAX_SOC]:
                 errors[OPT_MIN_SOC] = "invalid_soc_range"
             if not user_input[OPT_MIN_SOC] <= user_input[OPT_SAFE_SOC] < user_input[OPT_MAX_SOC]:
@@ -276,6 +286,7 @@ class PrelumoOptionsFlow(OptionsFlow):
             req(OPT_EV_DEFAULT_TARGET): _num(20, 100, 1, "%"),
             req(OPT_EV_CHEAP_ONLY): selector.BooleanSelector(),
             req(OPT_HP_BASE_TEMP): _num(5, 25, 0.5, "°C"),
+            req(OPT_DHW_BOOSTS): str,
             req(OPT_HISTORY_WEEKS): _num(1, 26, 1),
             req(OPT_HORIZON): _num(24, 48, 1, "h"),
             req(OPT_SOC_STEP): _num(1, 10, 1, "%"),

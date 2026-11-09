@@ -32,7 +32,7 @@ _KEYS = [
     ("sensor", "expected_savings"), ("sensor", "shadow_savings"), ("sensor", "last_full_charge"),
     ("sensor", "battery_energy_cost"), ("sensor", "self_sufficiency"), ("sensor", "battery_cycles"),
     ("sensor", "ev_energy_needed"), ("sensor", "load_forecast"), ("sensor", "pv_forecast_corrected"),
-    ("sensor", "forecast_accuracy"),
+    ("sensor", "forecast_accuracy"), ("sensor", "dhw_plan"),
     ("select", "strategy"), ("switch", "auto_mode"), ("switch", "shadow_mode"),
     ("switch", "grid_arbitrage"), ("switch", "safe_level"), ("switch", "sell_load_guard"),
     ("binary_sensor", "fallback_active"),
