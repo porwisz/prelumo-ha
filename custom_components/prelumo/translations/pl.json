@@ -277,6 +277,9 @@
       },
       "sell_load_guard": {
         "name": "Ograniczaj sprzedaż przy wyższym zużyciu"
+      },
+      "dhw_control": {
+        "name": "Sterowanie CWU"
       }
     },
     "time": {

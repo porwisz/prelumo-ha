@@ -1,12 +1,19 @@
 """Hot water boosts as flexible loads: learning from the recorder, the loads for the planner,
-what the plan says about them. Prelumo only watches here - the boosts still run when the
-user's own automations start them (``usual`` hour); the best hour and its saving are reported."""
+what the plan says about them, and starting them.
+
+With the hot water switch off Prelumo only watches: the boosts run when the user's own
+automations start them (``usual`` hour) and the best hour and its saving are reported. With it on
+Prelumo sets the tank's target temperature at the hour the plan chose and the temperature to keep
+afterwards when the tank is hot or the window ends."""
 
 from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
+
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_DHW_CLIMATE, CONF_DHW_TEMP, CONF_HP_POWER, OPT_DHW_BOOSTS, OPTION_DEFAULTS
 from .core import dhw
@@ -20,7 +27,8 @@ _LOGGER = logging.getLogger(__name__)
 
 HISTORY = timedelta(days=10)  # raw recorder history
 NEAR = timedelta(hours=3)  # a boost this close starts from the temperature the tank has now
-DONE_MARGIN = 1.0  # deg C below the target: the boost is done
+DONE_MARGIN = 1.0  # deg C below the target: the boost is done (not planned again that day)
+REACHED = 0.3  # deg C below the target: a running boost is ended
 KEEP_DONE = timedelta(days=3)
 
 
@@ -33,6 +41,8 @@ class DhwManager:
         self.usual: dict[str, int] = {}  # boost key -> clock hour it usually starts in
         self.profile: dict[int, float] = {}  # kWh per clock hour of the reheats that are no boost
         self.plan: list[dict[str, Any]] = []  # the last plan, for the sensor
+        self.running: dict[str, dict[str, str]] = {}  # boost key -> {start, day} of a boost Prelumo started
+        self.last_action: str | None = None
         self._windows: dict[str, date] = {}  # boost key -> day of the window the plan is about
 
     # --- configuration ---------------------------------------------------
@@ -74,7 +84,7 @@ class DhwManager:
 
     def controlled(self) -> bool:
         """Does Prelumo start the boosts itself?"""
-        return False
+        return bool(self.coord.dhw_control) and self.configured
 
     # --- learning ----------------------------------------------------------
     async def learn(self, now: datetime) -> None:
@@ -149,8 +159,12 @@ class DhwManager:
         return out
 
     def fixed(self, boost: dhw.DhwBoost, hours: list[datetime]) -> int | None:
-        """Hour index of a boost already running (not moved any more)."""
-        return None
+        """Hour index of a boost Prelumo has started and not finished (not moved any more)."""
+        run = self.running.get(boost.key)
+        if run is None or self.done.get(boost.key) == run["day"]:
+            return None
+        start = datetime.fromisoformat(run["start"]).replace(minute=0, second=0, microsecond=0)
+        return next((i for i, h in enumerate(hours) if h == start), 0)
 
     def after_plan(self, placements: list[Placement], hours: list[datetime]) -> None:
         by_key = {b.key: b for b in self.boosts()}
@@ -196,9 +210,59 @@ class DhwManager:
                     changed = True
         return changed
 
+    async def control(self, now: datetime) -> None:
+        """Start the boosts at the hour the plan chose and end them (switch on, grid present).
+
+        The target is set once, at the start - a temperature changed by hand meanwhile is left
+        alone. Without a plan for today's window the boost starts in the window's last hour.
+        """
+        if not self.controlled():
+            self.running = {}
+            return
+        temp = self.temperature()
+        for b in self.boosts():
+            day = self.window_day(b, now).isoformat()
+            run = self.running.get(b.key)
+            inside = b.covers(now.hour) and (not b.peak_only or self.coord.tariff().peak_day(
+                self.window_day(b, now)))
+            if run is not None:
+                hot = temp is not None and temp >= b.target - REACHED
+                if hot or not inside or run["day"] != day:
+                    if await self._set(b.after, f"{b.key}: end, keep {b.after:g}"):
+                        del self.running[b.key]
+                        self.done[b.key] = run["day"]
+                        self.coord.save()
+                continue
+            if not inside or self.done.get(b.key) == day:
+                continue
+            entry = next((p for p in self.plan if p["window"] == f"{b.start:02d}:00-{b.end:02d}:00"
+                          and p["day"] == day), None)
+            if entry is not None and entry["best_start"]:
+                due = now >= datetime.fromisoformat(entry["best_start"])
+            else:  # no plan for this window: do not leave the house without hot water
+                due = not b.covers((now + timedelta(hours=1)).hour)
+            if due and await self._set(b.target, f"{b.key}: start, heat to {b.target:g}"):
+                self.running[b.key] = {"start": now.isoformat(), "day": day}
+                self.coord.save()
+
+    async def _set(self, temperature: float, what: str) -> bool:
+        try:
+            await self.coord.hass.services.async_call(
+                "climate", "set_temperature", {"entity_id": self.climate, "temperature": temperature},
+                blocking=True,
+            )
+        except HomeAssistantError as err:
+            _LOGGER.warning("Hot water %s failed: %s", what, err)
+            self.last_action = f"{what} - failed: {err}"
+            return False
+        _LOGGER.info("Hot water %s", what)
+        self.last_action = f"{dt_util.now():%Y-%m-%d %H:%M} {what}"
+        return True
+
     # --- storage / state -------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
-        return {"events": self.events, "done": self.done, "choice": self.choice, "usual": self.usual}
+        return {"events": self.events, "done": self.done, "choice": self.choice, "usual": self.usual,
+                "running": self.running, "last_action": self.last_action}
 
     def load(self, data: dict[str, Any] | None) -> None:
         data = data or {}
@@ -206,6 +270,8 @@ class DhwManager:
         self.done = dict(data.get("done") or {})
         self.choice = dict(data.get("choice") or {})
         self.usual = {k: int(v) for k, v in (data.get("usual") or {}).items()}
+        self.running = dict(data.get("running") or {})
+        self.last_action = data.get("last_action")
 
     def attrs(self) -> dict[str, Any]:
         return {
@@ -214,6 +280,8 @@ class DhwManager:
             "temperature": self.temperature(),
             "boosts": self.plan,
             "done": self.done,
+            "running": self.running,
+            "last_action": self.last_action,
             "kwh_per_degree": self.per_degree,
             "heating_power_kw": self.power_kw,
             "learned": dhw.kwh_per_degree(self.events) is not None,

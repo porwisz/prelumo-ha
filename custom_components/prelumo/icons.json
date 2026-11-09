@@ -81,6 +81,9 @@
       },
       "sell_load_guard": {
         "default": "mdi:transmission-tower-export"
+      },
+      "dhw_control": {
+        "default": "mdi:water-boiler-auto"
       }
     }
   },

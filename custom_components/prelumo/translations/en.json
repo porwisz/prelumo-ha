@@ -276,6 +276,9 @@
       },
       "sell_load_guard": {
         "name": "Limit selling on higher use"
+      },
+      "dhw_control": {
+        "name": "Hot water control"
       }
     },
     "time": {

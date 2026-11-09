@@ -422,7 +422,10 @@ async def test_hot_water_boosts_are_planned_and_reported(hass: HomeAssistant, re
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
     coord = entry.runtime_data
-    assert coord.dhw.configured and not coord.dhw.controlled()
+    assert coord.dhw.configured and coord.dhw.controlled()  # the switch is on by default
+    await hass.services.async_call("switch", "turn_off", {"entity_id": "switch.prelumo_dhw_control"}, blocking=True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert not coord.dhw.controlled()
     st = hass.states.get("sensor.prelumo_dhw_plan")
     boosts = st.attributes["boosts"]
     assert [b["window"] for b in boosts] in (["03:00-07:00", "13:00-16:00"], ["13:00-16:00", "03:00-07:00"])
@@ -446,3 +449,93 @@ async def test_no_hot_water_entity_means_no_boosts(hass: HomeAssistant, setup) -
     coord = entry.runtime_data
     assert not coord.dhw.configured and coord.plan_state.result.flex == []
     assert hass.states.get("sensor.prelumo_dhw_plan").attributes["boosts"] == []
+
+
+async def test_hot_water_boost_is_started_at_the_planned_hour_and_ended(hass: HomeAssistant, recorder_mock) -> None:
+    """Switch on: the target is set when the planned start comes, the temperature to keep when
+    the tank is hot; the window is then done for the day and nothing is set twice."""
+    from unittest.mock import patch
+
+    _seed(hass)
+    hass.states.async_set("climate.tank", "auto", {"current_temperature": 41.0, "temperature": 40})
+    hass.states.async_set("sensor.tank_temp", "41.0", {"unit_of_measurement": "°C"})
+    sets: list[float] = []
+
+    async def _set_temperature(call: ServiceCall) -> None:
+        sets.append(call.data["temperature"])
+
+    hass.services.async_register("climate", "set_temperature", _set_temperature)
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={
+        "inverter_prefix": "deye_falownik", "write_action": "esphome.deye_modbus_zapisz_harmonogram",
+        "mode_select": "select.deye_falownik_ust_tryb_pracy", "mode_export_first": "Export First",
+        "mode_zero_export": "Zero Export To CT",
+        "rce_today": "sensor.rce_pse_price", "solcast_today": "sensor.solcast_pv_forecast_prognoza_na_dzisiaj",
+        "outage_entity": DEFAULTS["outage_entity"], "outage_threshold": 180.0,
+        "dhw_climate": "climate.tank", "dhw_temperature": "sensor.tank_temp",
+    }, options={**OPTION_DEFAULTS, "dhw_boosts": "13:00-16:00 53 40"})
+    entry.add_to_hass(hass)
+    t = dt_util.now().replace(hour=9, minute=10, second=0, microsecond=0)
+    with patch("custom_components.prelumo.coordinator.dt_util.now", return_value=t):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        coord = entry.runtime_data
+        await coord.async_replan()
+    (boost,) = coord.dhw.plan
+    start = dt_util.parse_datetime(boost["best_start"])
+    assert 13 <= start.hour <= 15 and boost["planned_start"] == boost["best_start"]
+    dhw = coord.dhw
+    sets.clear()
+    await dhw.control(start - timedelta(minutes=1))
+    assert sets == [] and not dhw.running
+    await dhw.control(start + timedelta(minutes=1))
+    assert sets == [53.0] and "13-16" in dhw.running
+    await dhw.control(start + timedelta(minutes=2))
+    assert sets == [53.0]  # set once; a value changed by hand meanwhile is left alone
+    # still running: the next plan keeps it where it started
+    hrs = [start + timedelta(hours=i) for i in range(36)]
+    assert dhw.loads(start + timedelta(minutes=5), hrs)[0].fixed == 0
+    hass.states.async_set("sensor.tank_temp", "52.9", {"unit_of_measurement": "°C"})
+    await dhw.control(start + timedelta(minutes=40))
+    assert sets == [53.0, 40.0] and not dhw.running and dhw.done == {"13-16": start.date().isoformat()}
+    await dhw.control(start + timedelta(minutes=41))
+    assert sets == [53.0, 40.0]
+    # switch off: nothing is touched
+    coord.dhw_control = False
+    dhw.done.clear()
+    await dhw.control(start + timedelta(minutes=42))
+    assert sets == [53.0, 40.0]
+
+
+async def test_hot_water_boost_ends_with_the_window_and_starts_late_without_a_plan(
+    hass: HomeAssistant, recorder_mock
+) -> None:
+    _seed(hass)
+    hass.states.async_set("climate.tank", "auto", {"current_temperature": 41.0, "temperature": 40})
+    sets: list[float] = []
+
+    async def _set_temperature(call: ServiceCall) -> None:
+        sets.append(call.data["temperature"])
+
+    hass.services.async_register("climate", "set_temperature", _set_temperature)
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={
+        "inverter_prefix": "deye_falownik", "write_action": "esphome.deye_modbus_zapisz_harmonogram",
+        "mode_select": "select.deye_falownik_ust_tryb_pracy", "mode_export_first": "Export First",
+        "mode_zero_export": "Zero Export To CT",
+        "rce_today": "sensor.rce_pse_price", "solcast_today": "sensor.solcast_pv_forecast_prognoza_na_dzisiaj",
+        "outage_entity": DEFAULTS["outage_entity"], "outage_threshold": 180.0, "dhw_climate": "climate.tank",
+    }, options={**OPTION_DEFAULTS, "dhw_boosts": "13:00-16:00 53 40"})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    dhw = entry.runtime_data.dhw
+    dhw.plan, dhw.done, dhw.running = [], {}, {}
+    sets.clear()
+    day = dt_util.now().replace(minute=0, second=0, microsecond=0)
+    await dhw.control(day.replace(hour=14, minute=30))
+    assert sets == []  # no plan: wait for the window's last hour
+    await dhw.control(day.replace(hour=15, minute=1))
+    assert sets == [53.0]
+    await dhw.control(day.replace(hour=15, minute=59))
+    assert sets == [53.0]  # the tank (41 deg C) is not hot yet
+    await dhw.control(day.replace(hour=16, minute=0))
+    assert sets == [53.0, 40.0] and dhw.done["13-16"] == day.date().isoformat()

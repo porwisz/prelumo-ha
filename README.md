@@ -166,8 +166,18 @@ sieci po cenie RCE. Prelumo traktuje podbicie CWU jak ładunek, który można pr
 - **`sensor.prelumo_dhw_plan`** — stan: najtańszy start najbliższego podbicia; atrybut `boosts`:
   okno, energia, `best_start`, `usual_start` (kiedy podbicie zwykle startuje), `planned_start`
   (gdzie liczy je plan baterii), `saving_vs_usual`, `extra_cost_by_start`.
-- W tej wersji Prelumo **tylko podgląda**: podbicia nadal uruchamiają Twoje automatyzacje, plan
-  baterii liczy je w zwykłej godzinie, a sensor pokazuje, ile dałoby przesunięcie.
+- **`switch.prelumo_dhw_control`** (domyślnie wł.) — Prelumo samo uruchamia podbicia: w wybranej
+  godzinie ustawia na encji climate temperaturę docelową (raz — zmiana ręczna w trakcie nie jest
+  nadpisywana), a gdy zasobnik ją osiągnie albo okno się skończy, ustawia temperaturę „potem”.
+  Okno jest wtedy na ten dzień zrobione. Plan baterii liczy podbicie w wybranej godzinie. Bez planu
+  na dane okno (np. błąd planowania) podbicie startuje w ostatniej godzinie okna; przy awarii sieci
+  nie startuje. Przełącznik działa niezależnie od trybu cienia i „Sterowania automatycznego”
+  (te dotyczą falownika).
+- Przełącznik wyłączony = **tylko podgląd**: podbicia uruchamiają Twoje automatyzacje, plan baterii
+  liczy je w zwykłej godzinie, a sensor pokazuje, ile dałoby przesunięcie.
+- Własne automatyzacje ustawiające temperaturę w oknach podbić powinny mieć warunek
+  `{{ not is_state('switch.prelumo_dhw_control', 'on') }}` — wtedy działają tylko, gdy Prelumo
+  nie steruje.
 
 ### Strategie
 - **Autokonsumpcja** — bateria nigdy nie oddaje do sieci; może ładować się z sieci w strefie

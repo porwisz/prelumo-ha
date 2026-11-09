@@ -18,7 +18,7 @@ Brak podbić CWU w horyzoncie planu (albo CWU nie jest skonfigurowane: ⋮ → Z
 {{ b.window }}: {% for k, v in (b.extra_cost_by_start or {}).items() %}{{ k }} {{ '+%.2f zł' % v }}{{ ' · ' if not loop.last }}{% endfor %}
 
 {% endfor -%}
-Zasobnik {{ state_attr('${S}','temperature') }} °C · {{ state_attr('${S}','kwh_per_degree') }} kWh/°C{{ '' if state_attr('${S}','learned') else ' (wartość domyślna, jeszcze nie wyuczona)' }} · {{ state_attr('${S}','heating_power_kw') }} kW · sterowanie Prelumo: **{{ 'tak' if state_attr('${S}','control') else 'nie (tylko podgląd)' }}**
+Zasobnik {{ state_attr('${S}','temperature') }} °C · {{ state_attr('${S}','kwh_per_degree') }} kWh/°C{{ '' if state_attr('${S}','learned') else ' (wartość domyślna, jeszcze nie wyuczona)' }} · {{ state_attr('${S}','heating_power_kw') }} kW · sterowanie Prelumo: **{{ 'tak' if state_attr('${S}','control') else 'nie (tylko podgląd)' }}**{{ ' · ' ~ state_attr('${S}','last_action') if state_attr('${S}','last_action') else '' }}
 {%- endif -%}`;
 
 function planView(E, I) {
@@ -192,6 +192,7 @@ function decisionsView(E, I) {
           tile(E.ev_energy_needed, "Auto potrzebuje", 4),
           tile(E.forecast_accuracy, "Błąd prognozy zużycia (7 dni)", 4),
           { type: "heading", heading: "Ciepła woda (CWU)", icon: "mdi:water-boiler" },
+          tile(E.dhw_control, "Prelumo steruje CWU"), tile(E.dhw_plan, "Najtańszy start podbicia"),
           md(dhwTable(E.dhw_plan)),
           { type: "history-graph", hours_to_show: 72, entities: [{ entity: E.expected_savings, name: "Oczekiwana oszczędność" }], grid_options: { columns: "full", rows: 3 } },
         ],

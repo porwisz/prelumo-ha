@@ -201,6 +201,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.arbitrage = False
         self.safe_level = False  # keep the battery at the safe level (sales may dip below)
         self.sell_load_guard = False  # house above the forecast while selling limits the sale
+        # Prelumo starts the hot water boosts itself (switch, on by default). None until the
+        # switch has restored its state: the first refresh runs before that and must not act.
+        self.dhw_control: bool | None = None
         self.load_meter = LoadMeter()  # house draw without the EV, last minutes
         self.grid_energy: bool | None = None  # battery holds energy bought from the grid
         self.grid_charge_hour: datetime | None = None  # clock hour the battery last charged from the grid
@@ -477,6 +480,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self._sample_house(now)
         if self.dhw.tick(now):
             self.save()
+        if not outage:  # on the battery alone the tank is not heated up
+            await self.dhw.control(now)
         if plan is not None:
             data.active_index = plan.active_index(now)
             data.next_change, _ = plan.next_change(now)
