@@ -55,6 +55,7 @@ def test_full_charge_respects_price_cap_and_reports_impossible():
 # --- daily energy ledger: cycles, self-sufficiency, monthly totals -----------
 def _ledger():
     from datetime import date
+
     from core.shadow import ShadowLedger
     led = ShadowLedger()
     for i, (house, pv, imp, exp, dis) in enumerate([

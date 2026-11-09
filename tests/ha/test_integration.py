@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -139,7 +139,8 @@ async def test_stale_data_uses_fallback(hass: HomeAssistant, setup) -> None:
 
 async def test_auto_write_once_then_no_rewrite(hass: HomeAssistant, setup) -> None:
     entry, calls = setup
-    from unittest.mock import PropertyMock, patch as _patch
+    from unittest.mock import PropertyMock
+    from unittest.mock import patch as _patch
     _p = _patch.object(type(entry.runtime_data), "opt", new_callable=PropertyMock,
                        return_value={**OPTION_DEFAULTS, "min_gain": 0.0})  # any improvement counts
     _p.start()
@@ -165,8 +166,9 @@ async def test_shadow_mode_never_touches_work_mode(hass: HomeAssistant, setup) -
     entry, calls = setup
     coord = entry.runtime_data
     # 19:30 is inside the Sell slot -> Prelumo wants Export First
-    from homeassistant.util import dt as dt_util
     from unittest.mock import patch
+
+    from homeassistant.util import dt as dt_util
     t = dt_util.now().replace(hour=19, minute=30)
     with patch("custom_components.prelumo.coordinator.dt_util.now", return_value=t):
         await coord.async_refresh()
@@ -254,24 +256,26 @@ async def test_options_flow_opens_and_saves(hass: HomeAssistant, setup) -> None:
 
 async def test_models_relearned_after_restart_same_day(hass: HomeAssistant, setup) -> None:
     """Models live in memory; a restart on a day already learned must not leave them empty."""
+    from unittest.mock import AsyncMock, patch
+
     from homeassistant.util import dt as dt_util
-    from unittest.mock import AsyncMock
     entry, _ = setup
     coord = entry.runtime_data
-    coord._models_ready = False  # what a fresh start looks like
+    coord.models_ready = False  # what a fresh start looks like
     coord.last_learn = dt_util.now().date().isoformat()
-    coord._learn = AsyncMock()
-    await coord.async_replan()
-    coord._learn.assert_awaited_once()
-    assert coord._models_ready
-    await coord.async_replan()
-    coord._learn.assert_awaited_once()  # not again the same day
+    with patch("custom_components.prelumo.learning.learn_models", AsyncMock()) as learn:
+        await coord.async_replan()
+        learn.assert_awaited_once()
+        assert coord.models_ready
+        await coord.async_replan()
+        learn.assert_awaited_once()  # not again the same day
 
 
 async def test_export_blocked_at_a_low_sell_price(hass: HomeAssistant, setup) -> None:
     """A sell slot does not get Export First while this hour's RCE price is at or below the
     block threshold - checked live, so it also holds for a plan written an hour ago."""
     from unittest.mock import patch
+
     from homeassistant.util import dt as dt_util
     entry, _ = setup
     coord = entry.runtime_data
@@ -324,22 +328,23 @@ async def test_sell_prices_survive_a_restart(hass: HomeAssistant, setup) -> None
     entry, _ = setup
     coord = entry.runtime_data
     await coord.async_replan()
-    assert coord._sell_seen
-    stored = {h.isoformat(): v for h, v in coord._sell_seen.items()}
+    assert coord.sell_seen
+    stored = {h.isoformat(): v for h, v in coord.sell_seen.items()}
 
     back = coord._load_sell_seen(stored)
-    assert back == coord._sell_seen
+    assert back == coord.sell_seen
     hour = dt_util.now().replace(minute=0, second=0, microsecond=0)
     assert hour in back  # this hour's price, so the check works before the first re-plan
 
-    coord._sell_seen = {}
+    coord.sell_seen = {}
     assert coord._export_blocked(dt_util.now()) is True  # what it looked like before
-    coord._sell_seen = coord._load_sell_seen(stored)
+    coord.sell_seen = coord._load_sell_seen(stored)
     assert coord._export_blocked(dt_util.now()) is False
 
 
 async def test_stored_sell_prices_older_than_the_window_are_dropped(hass: HomeAssistant, setup) -> None:
     from datetime import timedelta
+
     from homeassistant.util import dt as dt_util
     entry, _ = setup
     coord = entry.runtime_data

@@ -192,7 +192,7 @@ async def read_weather_temps(hass: HomeAssistant, entity_id: str | None) -> dict
             "weather", "get_forecasts", {"entity_id": entity_id, "type": "hourly"},
             blocking=True, return_response=True,
         )
-    except Exception as err:  # noqa: BLE001 - weather is optional
+    except Exception as err:
         _LOGGER.debug("Weather forecast unavailable: %s", err)
         return {}
     out = {}
@@ -215,7 +215,7 @@ async def read_calendar(
             {"entity_id": entity_id, "start_date_time": start.isoformat(), "end_date_time": end.isoformat()},
             blocking=True, return_response=True,
         )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.debug("Calendar unavailable: %s", err)
         return []
     out = []
@@ -305,7 +305,7 @@ async def last_hour_at_or_above(
 
 
 async def grid_charged_since_low(
-    hass: HomeAssistant, inv: "InverterEntities", low_soc: float, now: datetime
+    hass: HomeAssistant, inv: InverterEntities, low_soc: float, now: datetime
 ) -> bool:
     """Has the battery taken energy from the grid since it was last at ``low_soc``?
 

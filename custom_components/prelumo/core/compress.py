@@ -13,13 +13,21 @@ simulated cost increase is the smallest.
 from __future__ import annotations
 
 import math
-
 from dataclasses import dataclass
 from datetime import datetime
 
 from .optimizer import (
-    FULL_CHARGE_PENALTY, SELL_THEN_BUY_KWH, BatteryParams, HourInput, HourMode, HourPlan, expensive_reserve, hold_cost,
-    max_charge_kwh, pv_risk, risk_cost,
+    FULL_CHARGE_PENALTY,
+    SELL_THEN_BUY_KWH,
+    BatteryParams,
+    HourInput,
+    HourMode,
+    HourPlan,
+    expensive_reserve,
+    hold_cost,
+    max_charge_kwh,
+    pv_risk,
+    risk_cost,
 )
 from .plan import MAX_POWER_W, SLOT_COUNT, DayPlan, Slot, SlotMode
 
@@ -413,7 +421,6 @@ def rolling(
     """
     n = min(window, len(plan))
     plan, hours = plan[:n], hours[:n]
-    cost_of = _cost_fn(hours, soc_now, params, grid_energy)
     stamps = [f"{h.start:%H:%M}" for h in hours]
 
     def soft_cost(ss: list[Segment], start: int | None) -> float:
@@ -505,7 +512,11 @@ def compress(
     window: int = 24,
     grid_energy: bool = False,
 ) -> tuple[list[Segment], float]:
-    """Greedy cost-aware merge of hourly settings into ``slots`` segments (first 24 h)."""
+    """Greedy cost-aware merge of hourly settings into ``slots`` segments (first 24 h).
+
+    Not used by the planner since the rolling slots (``rolling``); kept because its tests pin
+    the behaviour of ``simulate`` and of the merge helpers both share.
+    """
     n = min(window, len(plan))
     plan, hours = plan[:n], hours[:n]
     segs = _segments(plan, hours, params)

@@ -3,7 +3,13 @@ from datetime import datetime, timedelta
 from core.compress import Setting, compress, hour_setting, simulate, to_day_plan
 from core.diff import WriteGuard, WritePolicy, material_changes
 from core.optimizer import (
-    BatteryParams, HourInput, HourMode, Strategy, max_charge_kwh, optimize, simulate_baseline,
+    BatteryParams,
+    HourInput,
+    HourMode,
+    Strategy,
+    max_charge_kwh,
+    optimize,
+    simulate_baseline,
 )
 from core.plan import SlotMode
 from core.planner import parse_fallback_plan
@@ -136,7 +142,7 @@ def test_min_sell_soc_floor():
 def test_compress_never_grid_charges_above_price_cap():
     """Regression: an expensive 'normal' hour must not be merged into a grid-charge slot."""
     from dataclasses import replace
-    from core.optimizer import HourPlan
+
     cap = replace(P, max_grid_charge_price=0.65)
     # 20:00 is peak (1.45), the rest off-peak; alternate charge/sell to force many merges
     buy = [1.45, 1.45, 1.45] + [0.65] * 21
@@ -161,6 +167,7 @@ def test_write_guard_min_gain():
 
 def test_current_plan_cost_and_gain():
     from datetime import datetime as _dt
+
     from core.forecast.ev import EvForecast
     from core.planner import PlannerInputs, run_planner
     from core.tariff import G13Tariff
@@ -183,6 +190,7 @@ def test_current_plan_cost_and_gain():
 
 def test_plan_violations():
     from dataclasses import replace
+
     from core.planner import plan_violations
     hrs = day(G13_BUY, FLAT_SELL)
     p = parse_fallback_plan("00:00 20; 05:00 80 grid_charge; 08:00 20; 13:00 20; 18:00 10 sell; 21:00 20")
@@ -199,6 +207,7 @@ def test_grid_charge_slot_never_covers_expensive_hour_even_if_battery_full():
     the forecast is off, the inverter charges at peak price. The cap is a hard rule.
     """
     from dataclasses import replace
+
     from core.compress import Setting, simulate
     cap = replace(P, max_grid_charge_price=0.65)
     hrs = day([0.65, 1.45], [0.3, 0.3], pv=[0, 2], load=[0, 0])
@@ -239,6 +248,7 @@ def test_battery_first_in_expensive_hours():
     house runs on the battery in expensive hours and only the rest is sold.
     """
     from dataclasses import replace
+
     from core.compress import compress, to_day_plan
     buy = [0.65, 0.65] + [1.45] * 5 + [0.65] * 3
     sell = [0.6, 0.7, 0.9, 1.24, 1.53, 1.65, 1.41, 1.0, 0.9, 0.8]
@@ -265,6 +275,7 @@ def test_battery_first_survives_slot_merging_and_replaces_bad_plan():
     """
     from dataclasses import replace
     from datetime import datetime as _dt
+
     from core.forecast.ev import EvForecast
     from core.planner import PlannerInputs, plan_violations, run_planner
     from core.tariff import G13Tariff
@@ -294,6 +305,7 @@ def test_reserve_for_expensive_hours_after_selling():
     expensive hours (+ margin).
     """
     from dataclasses import replace
+
     from core.optimizer import expensive_reserve
     buy = [0.63, 1.5, 1.5, 1.5, 0.63, 0.63]
     sell = [0.6, 1.53, 1.65, 1.41, 0.9, 0.8]
@@ -319,6 +331,7 @@ def test_sell_slots_not_merged_through_the_reserve():
     buy at 20:00. A sale followed by house import in the same expensive run is a hard rule.
     """
     from dataclasses import replace
+
     from core.compress import Setting, simulate
     hrs = day([1.5, 1.5, 0.63], [1.65, 1.41, 0.9], load=[0.5, 1.5, 0.5])
     p = replace(P, max_soc=98, min_sell_soc=20, battery_first_above=0.63, max_grid_charge_price=0.63)
@@ -330,6 +343,7 @@ def test_sell_slots_not_merged_through_the_reserve():
 
 def test_sell_slot_floor_respects_reserve_regardless_of_forecast_soc():
     from dataclasses import replace
+
     from core.compress import Setting, simulate
     hrs = day([1.5, 1.5, 0.63], [1.65, 1.41, 0.9], load=[0.5, 3.0, 0.5])
     p = replace(P, max_soc=98, min_sell_soc=20, battery_first_above=0.63, max_grid_charge_price=0.63)
@@ -344,7 +358,8 @@ def test_idle_sell_tail_becomes_normal_slot():
     """Regression (user report): the sell slot 20:00 ran all night at the floor (nothing to sell)
     and padding duplicated it - the inverter would sit in Export First the whole night."""
     from dataclasses import replace
-    from core.compress import Segment, Setting, compress
+
+    from core.compress import compress
     from core.optimizer import HourPlan
     buy = [1.5] * 3 + [0.63] * 9
     sell = [1.53, 1.65, 1.41] + [0.0] * 9
@@ -371,6 +386,7 @@ def test_sell_slot_at_full_power_hits_floor_and_house_buys():
     """Regression (user test on the inverter): sell 98 -> 95 % at full power exported the 3 % in
     minutes, then the house bought from the grid for the rest of the slot."""
     from dataclasses import replace
+
     from core.compress import Setting, simulate
     hrs = day([1.5, 0.63], [1.65, 0.9], load=[1.5, 0.5])
     p = replace(P, max_soc=98, min_sell_soc=20, battery_first_above=0.63, max_grid_charge_price=0.63)
@@ -382,6 +398,7 @@ def test_sell_slot_at_full_power_hits_floor_and_house_buys():
 
 def test_sell_slot_power_spreads_the_sale_over_the_slot():
     from dataclasses import replace
+
     from core.compress import Segment, Setting, simulate, to_day_plan
     from core.plan import SlotMode
     hrs = day([1.5, 1.5, 0.63], [1.65, 1.6, 0.9], load=[1.0, 1.0, 0.5])
@@ -403,6 +420,7 @@ def test_sell_export_capped_by_inverter_sell_limit():
     """The Deye 'max sell power' (5.39 kW) caps the export: a sell slot discharges at most
     house + limit, so the SoC falls slower than the slot power suggests."""
     from dataclasses import replace
+
     from core.compress import Setting, simulate
     hrs = day([0.63, 0.63], [1.0, 0.9], load=[1.0, 0.5])
     p = replace(P, max_soc=98, min_sell_soc=20, grid_export_kw=5.39)
@@ -432,6 +450,7 @@ def test_sell_slot_never_exports_and_imports_in_one_hour():
     """Regression (user report): a sell slot at a cheap hour sold to its floor, then the house
     bought for the rest of the hour - selling and buying in the same slot makes no sense."""
     from dataclasses import replace
+
     from core.compress import Setting, simulate
     hrs = day([0.63, 0.63], [0.93, 0.8], load=[2.0, 0.5])
     p = replace(P, max_soc=98, min_sell_soc=20)
@@ -458,6 +477,7 @@ def test_cheap_night_charge_for_expensive_morning():
 def test_adjacent_grid_charge_slots_are_joined():
     """Grid charge to 38 %, 40 %, 48 % in three slots becomes one grid-charge setting."""
     from dataclasses import replace
+
     from core.compress import compress
     from core.optimizer import HourPlan
     buy = [0.63] * 4 + [0.9] * 4
@@ -476,6 +496,7 @@ def test_grid_energy_not_used_in_cheap_hours():
     """Regression (user report): energy charged from the grid fed the house at night (cheap
     hours) - a battery cycle to save the cheap price makes no sense; it waits for 7-13."""
     from dataclasses import replace
+
     from core.compress import Setting, simulate
     buy = [0.63] * 4 + [0.9048] * 4
     hrs = day(buy, [0.5] * 8, load=[0.6] * 8)
@@ -494,6 +515,7 @@ def test_slots_keep_the_due_full_charge():
     """Regression (user report): the hourly optimum charged to 100 % at 13-16 (full charge due),
     but the 6 slots cut it to 44 % - the slot simulator did not know about the requirement."""
     from dataclasses import replace
+
     from core.compress import Setting, simulate
     hrs = day([0.63] * 3 + [1.5] * 3, [0.5] * 6, load=[0.5] * 6)
     p = replace(P, min_soc=20, max_soc=100, require_full=True, max_charge_kw=10)
@@ -508,6 +530,7 @@ def test_cheap_hold_after_grid_charge_survives_slot_building():
     the morning) but the slot floor fell to min SoC, as the window had no later expensive
     hour - the slot plan then broke the grid-energy rule and was never written."""
     from dataclasses import replace
+
     from core.compress import compress
     from core.optimizer import HourPlan
     buy = [0.63] * 3 + [1.5] * 3 + [0.63] * 4
@@ -605,6 +628,7 @@ def test_sell_slot_power_never_below_the_house_peak():
     # Export First caps all battery output at the slot power: a kettle + oven above it would
     # come from the grid, so the sale is not spread below sell_min_power_kw
     from dataclasses import replace
+
     from core.compress import Setting, simulate
     hrs = day([1.5, 1.5, 0.63], [1.65, 1.6, 0.9], load=[1.0, 1.0, 0.5])
     p = replace(P, max_soc=98, min_sell_soc=20, sell_min_power_kw=6.0)
@@ -666,6 +690,7 @@ def test_force_sell_price_lifts_the_house_reserve():
 
 def test_without_force_sell_a_price_spike_does_not_break_the_reserve():
     from dataclasses import replace
+
     from core.optimizer import expensive_reserve
     buy = [0.63, 1.5, 1.5, 1.5, 0.63, 0.63]
     sell = [0.6, 1.53, 9.99, 1.41, 0.9, 0.8]

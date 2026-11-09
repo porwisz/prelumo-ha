@@ -15,7 +15,7 @@ from homeassistant.components import frontend
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.json import json_fragment, json_bytes
+from homeassistant.helpers.json import json_bytes, json_fragment
 
 from .const import CONF_RCE_TODAY, CONF_RCE_TOMORROW, DOMAIN
 
@@ -113,7 +113,7 @@ async def async_register_frontend(hass: HomeAssistant, version: str) -> None:
         await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(path), False)])
         frontend.add_extra_js_url(hass, f"{STATIC_URL}/{JS_FILE}?v={version}")
         hass.data[_REGISTERED] = True
-    except Exception:  # noqa: BLE001 - the dashboard is optional, planning must keep running
+    except Exception:
         _LOGGER.exception("Prelumo dashboard module could not be registered")
 
 
@@ -135,7 +135,7 @@ async def async_setup_dashboard(hass: HomeAssistant, coord: Any, version: str) -
             hass, "lovelace", sidebar_title="Prelumo", sidebar_icon="mdi:white-balance-sunny",
             frontend_url_path=URL_PATH, config={"mode": "yaml"}, require_admin=False, update=True,
         )
-    except Exception:  # noqa: BLE001 - the dashboard is optional, planning must keep running
+    except Exception:
         _LOGGER.exception("Prelumo dashboard could not be registered")
 
 
@@ -147,5 +147,5 @@ def async_remove_dashboard(hass: HomeAssistant) -> None:
         if data is not None and isinstance(data.dashboards.get(URL_PATH), _PrelumoLovelace):
             data.dashboards.pop(URL_PATH)
             frontend.async_remove_panel(hass, URL_PATH, warn_if_unknown=False)
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.exception("Prelumo dashboard could not be removed")

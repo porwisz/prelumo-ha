@@ -16,11 +16,16 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
-    DOMAIN, PLATFORMS, SERVICE_APPLY_PLAN, SERVICE_READ_PLAN, SERVICE_REPLAN, SERVICE_SET_SLOT,
+    DOMAIN,
+    PLATFORMS,
+    SERVICE_APPLY_PLAN,
+    SERVICE_READ_PLAN,
+    SERVICE_REPLAN,
+    SERVICE_SET_SLOT,
 )
 from .coordinator import PrelumoCoordinator
-from .dashboard import async_register_frontend, async_remove_dashboard, async_setup_dashboard
 from .core.plan import MAX_POWER_W, DayPlan, PlanError, Slot, SlotMode
+from .dashboard import async_register_frontend, async_remove_dashboard, async_setup_dashboard
 from .ha_io.inputs import read_current_plan
 
 type PrelumoConfigEntry = ConfigEntry[PrelumoCoordinator]

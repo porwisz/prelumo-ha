@@ -6,3 +6,9 @@ asyncio_mode = "auto"
 [tool.ruff]
 line-length = 110
 target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "RUF100"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "custom_components"]

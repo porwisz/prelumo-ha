@@ -9,7 +9,13 @@ from .compress import CAP_PENALTY, Segment, battery_held, rolling, settings_from
 from .diff import URGENT_HOURS, RuleCheck, rule_check
 from .forecast.ev import EvForecast
 from .optimizer import (
-    FULL_CHARGE_PENALTY, BatteryParams, HourInput, OptimizeResult, Strategy, expensive_reserve, optimize,
+    FULL_CHARGE_PENALTY,
+    BatteryParams,
+    HourInput,
+    OptimizeResult,
+    Strategy,
+    expensive_reserve,
+    optimize,
     simulate_baseline,
 )
 from .plan import MAX_POWER_W, SLOT_COUNT, DayPlan, PlanError, Slot, SlotMode, parse_hhmm

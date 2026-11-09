@@ -1,4 +1,5 @@
-"""Prelumo coordinator: reads inverter state every 30 s, re-plans every hour."""
+"""Prelumo coordinator: reads the inverter state every 30 s and sets the work mode, re-plans
+every 5 min (``PLAN_MINUTES``). The daily learning of the models lives in ``learning``."""
 
 from __future__ import annotations
 
@@ -19,35 +20,97 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_ALERT_ENTITY, CONF_EV_CALENDAR, CONF_EV_LIMIT, CONF_EV_MANUAL_READY, CONF_EV_MANUAL_SOC, CONF_EV_PLUGGED,
-    CONF_EV_POWER, CONF_EV_SOC, CONF_HP_POWER, CONF_INVERTER_PREFIX, CONF_MODE_EXPORT_FIRST,
-    CONF_MODE_SELECT, CONF_MODE_ZERO_EXPORT, CONF_OUTAGE_CALENDAR, CONF_OUTAGE_ENTITY,
+    CLOCK_DRIFT_MAX,
+    CONF_ALERT_ENTITY,
+    CONF_EV_CALENDAR,
+    CONF_EV_LIMIT,
+    CONF_EV_MANUAL_READY,
+    CONF_EV_MANUAL_SOC,
+    CONF_EV_PLUGGED,
+    CONF_EV_POWER,
+    CONF_EV_SOC,
+    CONF_INVERTER_PREFIX,
+    CONF_MODE_EXPORT_FIRST,
+    CONF_MODE_SELECT,
+    CONF_MODE_ZERO_EXPORT,
+    CONF_OUTAGE_CALENDAR,
+    CONF_OUTAGE_ENTITY,
     CONF_OUTAGE_THRESHOLD,
-    CONF_RCE_TODAY, CONF_RCE_TOMORROW, CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW, CONF_WEATHER,
-    CLOCK_DRIFT_MAX, CONF_WRITE_ACTION, DEFAULTS, DOMAIN, ISSUE_CLOCK_DRIFT, ISSUE_STALE_DATA, ISSUE_WRITE_FAILED, OPT_AFTERNOON_SUMMER,
-    OPT_AFTERNOON_WINTER, OPT_CAPACITY, OPT_EFFICIENCY, OPT_EV_CAPACITY, OPT_EV_CHARGER_KW, OPT_EV_CHEAP_ONLY,
-    OPT_EV_DEFAULT_TARGET, OPT_FALLBACK_PLAN, OPT_GRID_EXPORT, OPT_GRID_IMPORT, OPT_HISTORY_WEEKS,
-    OPT_HORIZON, OPT_HP_BASE_TEMP, OPT_MAX_CHARGE, OPT_MAX_DISCHARGE, OPT_MAX_SOC, OPT_MAX_WRITES,
-    OPT_MIN_SOC, OPT_MORNING_HOURS, OPT_PRICE_AFTERNOON, OPT_PRICE_MORNING, OPT_PRICE_OFF,
-    OPT_ALERT_LEAD, OPT_ALERT_SOC, OPT_ARBITRAGE_MARGIN, OPT_BATTERY_FIRST, OPT_BLOCK_EXPORT_PRICE, OPT_FORCE_SELL_PRICE, OPT_RESERVE_MARGIN, OPT_FULL_CHARGE_DAYS, OPT_MAX_CHARGE_PRICE, OPT_MAX_CHARGE_SOC, OPT_MIN_GAIN, OPT_MIN_SELL_SOC, OPT_PV_TRUST, OPT_SAFE_SOC, OPT_SELL_LOAD_MARGIN, OPT_SELL_MIN_POWER, OPT_SOC_STEP, OPT_SOC_TOLERANCE, OPT_STALE_HOURS, OPT_WEAR, OPTION_DEFAULTS, PLAN_MINUTES, SLOT_WINDOW_H,
-    STORAGE_VERSION, UPDATE_INTERVAL,
+    CONF_RCE_TODAY,
+    CONF_RCE_TOMORROW,
+    CONF_SOLCAST_TODAY,
+    CONF_SOLCAST_TOMORROW,
+    CONF_WEATHER,
+    CONF_WRITE_ACTION,
+    DEFAULTS,
+    DOMAIN,
+    ISSUE_CLOCK_DRIFT,
+    ISSUE_STALE_DATA,
+    ISSUE_WRITE_FAILED,
+    OPT_AFTERNOON_SUMMER,
+    OPT_AFTERNOON_WINTER,
+    OPT_ALERT_LEAD,
+    OPT_ALERT_SOC,
+    OPT_ARBITRAGE_MARGIN,
+    OPT_BATTERY_FIRST,
+    OPT_BLOCK_EXPORT_PRICE,
+    OPT_CAPACITY,
+    OPT_EFFICIENCY,
+    OPT_EV_CAPACITY,
+    OPT_EV_CHARGER_KW,
+    OPT_EV_CHEAP_ONLY,
+    OPT_EV_DEFAULT_TARGET,
+    OPT_FALLBACK_PLAN,
+    OPT_FORCE_SELL_PRICE,
+    OPT_FULL_CHARGE_DAYS,
+    OPT_GRID_EXPORT,
+    OPT_GRID_IMPORT,
+    OPT_HORIZON,
+    OPT_MAX_CHARGE,
+    OPT_MAX_CHARGE_PRICE,
+    OPT_MAX_CHARGE_SOC,
+    OPT_MAX_DISCHARGE,
+    OPT_MAX_SOC,
+    OPT_MAX_WRITES,
+    OPT_MIN_GAIN,
+    OPT_MIN_SELL_SOC,
+    OPT_MIN_SOC,
+    OPT_MORNING_HOURS,
+    OPT_PRICE_AFTERNOON,
+    OPT_PRICE_MORNING,
+    OPT_PRICE_OFF,
+    OPT_PV_TRUST,
+    OPT_RESERVE_MARGIN,
+    OPT_SAFE_SOC,
+    OPT_SELL_LOAD_MARGIN,
+    OPT_SELL_MIN_POWER,
+    OPT_SOC_STEP,
+    OPT_SOC_TOLERANCE,
+    OPT_STALE_HOURS,
+    OPT_WEAR,
+    OPTION_DEFAULTS,
+    PLAN_MINUTES,
+    SLOT_WINDOW_H,
+    STORAGE_VERSION,
+    UPDATE_INTERVAL,
 )
 from .core.balance import FULL_SOC, FullChargeTracker
 from .core.diff import RuleCheck, WriteGuard, WritePolicy, roll_due
 from .core.forecast.ev import CarState, EvForecast, EvPattern, forecast_ev
 from .core.forecast.heatpump import HeatPumpModel
-from .core.forecast.load import LoadProfile, base_load_samples
+from .core.forecast.load import LoadProfile
 from .core.forecast.pv import PvBias
 from .core.optimizer import BatteryParams, Strategy
 from .core.plan import SLOT_COUNT, DayPlan, PlanError, Slot, SlotMode, same_behaviour
 from .core.planner import PlannerInputs, PlannerResult, horizon_hours, parse_fallback_plan, run_planner
 from .core.sell_guard import LoadMeter, SellBoost, boost_sell_load
-from .core.shadow import ShadowLedger, energy_cost
+from .core.shadow import ShadowLedger
 from .core.stock import MAX_TICK_KWH, BatteryStock, account_tick
-from .core.taper import STALL_BAND, charge_events, merge_events, taper_from_events
+from .core.taper import STALL_BAND, taper_from_events
 from .core.tariff import G13Tariff
 from .ha_io import inputs as io
 from .ha_io.inverter import InverterWriter
+from .learning import learn_daily, learn_taper
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -156,13 +219,13 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.full = FullChargeTracker(int(self.opt[OPT_FULL_CHARGE_DAYS]))
         self.guard = WriteGuard(self._policy())
         self._plan_lock = asyncio.Lock()
-        self._yesterday_pv_forecast: dict[datetime, float] = {}
-        self._today_pv_forecast: dict[datetime, float] = {}
+        self.yesterday_pv_forecast: dict[datetime, float] = {}
+        self.today_pv_forecast: dict[datetime, float] = {}
         # hourly RCE, kept ~3 days: for yesterday's actual cost and for the live export check
         # right after a restart (persisted, so that check is not blind until the first re-plan)
-        self._sell_seen: dict[datetime, float] = {}
+        self.sell_seen: dict[datetime, float] = {}
         self._last_recover: datetime | None = None
-        self._models_ready = False  # load profile / heat pump / EV models are not persisted
+        self.models_ready = False  # load profile / heat pump / EV models are not persisted
         self._unsub: list = []
 
     # --- options -------------------------------------------------------
@@ -267,24 +330,6 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             afternoon_peak_winter=_range(o[OPT_AFTERNOON_WINTER]),
         )
 
-    async def _learn_taper(self) -> None:
-        """Measure the BMS charge taper from the recent climbs to 100 % (raw SoC history)."""
-        end = dt_util.now()
-        try:
-            points = await io.soc_history(self.hass, self.inv.soc, end - timedelta(days=10), end)
-        except Exception as err:  # noqa: BLE001 - recorder may not be ready
-            _LOGGER.debug("SoC history lookup failed: %s", err)
-            return
-        soc = io.state_float(self.hass, self.inv.soc)
-        if soc is not None and (not points or points[-1][0] < end):
-            points.append((end, soc))  # the recorder may not have committed the latest change yet
-        merged = merge_events(self.taper_events, charge_events(points))
-        if merged != self.taper_events:
-            self.taper_events = merged
-            _LOGGER.info("Charge taper learned from %d charges: %s", len(merged),
-                         taper_from_events(merged, float(self.opt[OPT_CAPACITY])))
-            self._save()
-
     def charge_taper(self) -> tuple[tuple[int, float], ...]:
         return taper_from_events(self.taper_events, float(self.opt[OPT_CAPACITY]))
 
@@ -299,20 +344,20 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.ev_pattern = EvPattern.from_dict(stored.get("ev_pattern"))
         self.ledger = ShadowLedger.from_dict(stored.get("shadow"))
         self.stock = BatteryStock.from_dict(stored.get("stock"))
-        self._sell_seen = self._load_sell_seen(stored.get("sell_seen"))
+        self.sell_seen = self._load_sell_seen(stored.get("sell_seen"))
         self.last_learn = stored.get("last_learn")
         self.grid_energy = stored.get("grid_energy")
         if stored.get("grid_charge_hour"):
             self.grid_charge_hour = dt_util.parse_datetime(stored["grid_charge_hour"])
         self.ev_power_seen = stored.get("ev_power_seen")
         self.taper_events = stored.get("taper_events") or []
-        await self._learn_taper()
+        await learn_taper(self)
         if self.grid_energy is None:  # first run: look it up in the history
             try:
                 self.grid_energy = await io.grid_charged_since_low(
                     self.hass, self.inv, float(self.opt[OPT_MIN_SOC]) + 1, dt_util.now()
                 )
-            except Exception as err:  # noqa: BLE001 - recorder may not be ready
+            except Exception as err:
                 _LOGGER.debug("Grid-energy history lookup failed: %s", err)
                 self.grid_energy = False
         self.guard.history = [dt for t in stored.get("writes", []) if (dt := dt_util.parse_datetime(t))]
@@ -324,7 +369,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 self.full.last_full = await io.last_hour_at_or_above(
                     self.hass, self.inv.soc, FULL_SOC, end - timedelta(days=60), end
                 )
-            except Exception as err:  # noqa: BLE001 - recorder may not be ready
+            except Exception as err:
                 _LOGGER.debug("Full-charge history lookup failed: %s", err)
         self._unsub.append(
             async_track_time_change(self.hass, self._scheduled, minute=list(PLAN_MINUTES), second=0)
@@ -337,14 +382,14 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         await super().async_shutdown()
 
     @callback
-    def _save(self) -> None:
+    def save(self) -> None:
         self.store.async_delay_save(
             lambda: {
                 "pv_bias": self.pv_bias.to_dict(),
                 "ev_pattern": self.ev_pattern.to_dict(),
                 "shadow": self.ledger.to_dict(),
                 "stock": self.stock.to_dict(),
-                "sell_seen": {h.isoformat(): v for h, v in self._sell_seen.items()},
+                "sell_seen": {h.isoformat(): v for h, v in self.sell_seen.items()},
                 "last_learn": self.last_learn,
                 "writes": [t.isoformat() for t in self.guard.history],
                 "last_full": self.full.last_full.isoformat() if self.full.last_full else None,
@@ -378,10 +423,10 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         data = PrelumoData(current_plan=plan, outage=outage, soc=io.state_float(self.hass, self.inv.soc))
         was_due = self.full_charge_planned()
         if self.full.observe(data.soc, now):
-            self._save()
+            self.save()
             # the climb to 100 % just finished: measure how long the last % took this time
             self.config_entry.async_create_background_task(
-                self.hass, self._learn_taper(), f"{DOMAIN}_learn_taper"
+                self.hass, learn_taper(self), f"{DOMAIN}_learn_taper"
             )
             if was_due:  # balancing done -> back to the everyday limit at once
                 self.config_entry.async_create_background_task(
@@ -391,7 +436,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 and self._last_soc >= STALL_BAND > data.soc and self._last_soc < FULL_SOC):
             # a climb stalled in the last % and dropped: its time at 99 % still teaches the taper
             self.config_entry.async_create_background_task(
-                self.hass, self._learn_taper(), f"{DOMAIN}_learn_taper"
+                self.hass, learn_taper(self), f"{DOMAIN}_learn_taper"
             )
         if data.soc is not None:
             self._last_soc = data.soc
@@ -489,10 +534,10 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 hour = now.replace(minute=0, second=0, microsecond=0)
                 if hour != self.grid_charge_hour:
                     self.grid_charge_hour = hour
-                    self._save()
+                    self.save()
         if new != self.grid_energy:
             self.grid_energy = new
-            self._save()
+            self.save()
 
     @callback
     def _export_blocked(self, now: datetime) -> bool:
@@ -502,7 +547,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         ``stale_hours`` old (or the price can be revised), so the work mode is checked against
         the live price every 30 s as well. With no price for this hour, exporting is blocked.
         """
-        price = self._sell_seen.get(now.replace(minute=0, second=0, microsecond=0))
+        price = self.sell_seen.get(now.replace(minute=0, second=0, microsecond=0))
         return price is None or price <= self.block_export_price()
 
     # --- average cost of the energy in the battery -------------------------
@@ -538,7 +583,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         if soc is not None and soc <= float(self.opt[OPT_MIN_SOC]) + 1:
             if self.stock.kwh > 0 or self.stock.estimated:
                 self.stock.reset(now)
-                self._save()
+                self.save()
             return
         names = {
             "charge": self.inv.battery_charge_total,
@@ -595,74 +640,19 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             try:
                 await self._replan(force_write)
                 self.plan_state.error = None
-            except Exception as err:  # noqa: BLE001 - never kill the loop
+            except Exception as err:
                 _LOGGER.exception("Planning failed")
                 self.plan_state.error = str(err)
-            self._save()
+            self.save()
             self.async_update_listeners()
             return self.plan_state
-
-    async def _learn(self, now: datetime) -> None:
-        o = self.opt
-        weeks = int(o[OPT_HISTORY_WEEKS])
-        end = now.replace(minute=0, second=0, microsecond=0)
-        start = end - timedelta(weeks=weeks)
-        c = self.conf
-        house = await io.hourly_kwh(self.hass, [self.inv.house], start, end)
-        hp = await io.hourly_kwh(self.hass, [c.get(CONF_HP_POWER)], start, end)
-        ev = await io.hourly_kwh(self.hass, [c.get(CONF_EV_POWER)], start, end)
-        self.load_profile = LoadProfile(base_load_samples(house, hp, ev))
-        temps = await io.hourly_mean_temp(self.hass, c.get(CONF_WEATHER), start, end)
-        self.hp_model = HeatPumpModel(float(o[OPT_HP_BASE_TEMP]))
-        if hp and temps:
-            self.hp_model.fit(hp, temps)
-        sessions = await io.ev_sessions(self.hass, c.get(CONF_EV_PLUGGED), ev, start, end)
-        if sessions:
-            self.ev_pattern = EvPattern.learn(sessions, weeks)
-        _LOGGER.debug("Learned: load %s h, HP coef %.3f, EV %s days",
-                      self.load_profile.sample_hours, self.hp_model.coef, len(self.ev_pattern.by_weekday))
-
-    async def _learn_daily(self, now: datetime) -> None:
-        """Models: at every start (they live in memory only) and once per day after that.
-
-        Once per day also: PV bias from yesterday + metered actual cost for the shadow ledger.
-        """
-        today = now.date().isoformat()
-        if not self._models_ready or self.last_learn != today:
-            await self._learn(now)
-            self._models_ready = True
-        if self.last_learn == today:
-            return
-        y0 = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-        y1 = y0 + timedelta(days=1)
-        actual_pv = await io.hourly_kwh(self.hass, self.inv.pv, y0, y1)
-        fc = self._yesterday_pv_forecast
-        if fc and actual_pv:
-            self.pv_bias.learn((h, fc[h], actual_pv.get(h, 0.0)) for h in fc if y0 <= h < y1)
-        imp = await io.hourly_energy_change(self.hass, self.inv.grid_import_total, y0, y1)
-        exp = await io.hourly_energy_change(self.hass, self.inv.grid_export_total, y0, y1)
-        if imp:
-            tariff = self.tariff()
-            buy = {h: tariff.price(h) for h in imp}
-            self.ledger.record_actual(y0.date(), energy_cost(imp, exp, buy, self._sell_seen))
-        house = await io.hourly_energy_change(self.hass, self.inv.house_total, y0, y1)
-        pv = await io.hourly_energy_change(self.hass, self.inv.pv_total, y0, y1)
-        dis = await io.hourly_energy_change(self.hass, self.inv.battery_discharge_total, y0, y1)
-        if house or imp or dis:
-            self.ledger.record_energy(
-                y0.date(), house=sum(house.values()), pv=sum(pv.values()),
-                grid_import=sum(imp.values()), grid_export=sum(exp.values()),
-                discharged=sum(dis.values()),
-            )
-        self.ledger.trim()
-        self.last_learn = today
 
     async def _replan(self, force_write: bool) -> None:
         now = dt_util.now()
         c, o = self.conf, self.opt
-        if self._today_pv_forecast and next(iter(self._today_pv_forecast)).date() != now.date():
-            self._yesterday_pv_forecast = self._today_pv_forecast
-        await self._learn_daily(now)
+        if self.today_pv_forecast and next(iter(self.today_pv_forecast)).date() != now.date():
+            self.yesterday_pv_forecast = self.today_pv_forecast
+        await learn_daily(self, now)
 
         horizon = int(o[OPT_HORIZON])
         hours = horizon_hours(now, horizon)
@@ -676,7 +666,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             self.stock.rescale(self.usable_kwh(soc), seed_price=self.max_grid_charge_price() / self.eta)
 
         pv_raw = io.read_solcast(self.hass, [c.get(CONF_SOLCAST_TODAY), c.get(CONF_SOLCAST_TOMORROW)])
-        self._today_pv_forecast = {h: v for h, v in pv_raw.items() if h.date() == now.date()} or self._today_pv_forecast
+        self.today_pv_forecast = {h: v for h, v in pv_raw.items() if h.date() == now.date()} or self.today_pv_forecast
         if not any(h in pv_raw for h in hours[:12]):
             stale.append("pv_forecast")
         sell = io.read_rce(self.hass, [c.get(CONF_RCE_TODAY), c.get(CONF_RCE_TOMORROW)])
@@ -684,8 +674,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         for ts, p in sell.items():
             sell_hourly.setdefault(ts.replace(minute=0, second=0, microsecond=0), []).append(p)
         sell_h = {h: sum(v) / len(v) for h, v in sell_hourly.items()}
-        self._sell_seen.update(sell_h)
-        self._sell_seen = {h: v for h, v in self._sell_seen.items() if now - h < SELL_SEEN_KEEP}
+        self.sell_seen.update(sell_h)
+        self.sell_seen = {h: v for h, v in self.sell_seen.items() if now - h < SELL_SEEN_KEEP}
         if not any(h in sell_h for h in hours[:12]):
             stale.append("sell_prices")
 
@@ -760,7 +750,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             if kw > 0.5:
                 if self.ev_power_seen is None or abs(kw - self.ev_power_seen) >= 0.1:
                     self.ev_power_seen = round(kw, 2)
-                    self._save()
+                    self.save()
                 return kw
         if self.ev_power_seen:
             return self.ev_power_seen
@@ -908,5 +898,5 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.guard.record(now)
         self._wrote(merged, now)
         self.plan_state.last_write = now
-        self._save()
+        self.save()
         await self.async_request_refresh()

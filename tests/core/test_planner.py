@@ -67,8 +67,8 @@ def test_violation_sell_below_expensive_reserve():
     from core.plan import DayPlan, Slot
     from core.planner import plan_violations
     d0 = datetime(2026, 10, 12, 19)
-    hrs = [HourInput(d0 + timedelta(hours=i), 0.0, l, 0.0, b, 1.4)
-           for i, (l, b) in enumerate([(1.0, 1.5), (3.0, 1.5), (0.5, 0.63)])]
+    hrs = [HourInput(d0 + timedelta(hours=i), 0.0, ld, 0.0, b, 1.4)
+           for i, (ld, b) in enumerate([(1.0, 1.5), (3.0, 1.5), (0.5, 0.63)])]
     p = BatteryParams(capacity_kwh=20, min_soc=20, max_soc=98, max_charge_kw=10, max_discharge_kw=10,
                       min_sell_soc=20, max_grid_charge_price=0.63, battery_first_above=0.63,
                       reserve_margin=0.2)
@@ -83,6 +83,7 @@ def test_violation_sell_below_expensive_reserve():
 
 def test_shadow_ledger_ignores_penalty_costs():
     from datetime import date
+
     from core.shadow import ShadowLedger
     led = ShadowLedger()
     led.record_plan(date(2026, 10, 13), 5.0, 10.0)

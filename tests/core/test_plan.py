@@ -3,7 +3,14 @@ from datetime import datetime, time
 import pytest
 
 from core.plan import (
-    FLAG_GRID_CHARGE, FLAG_SELL, DayPlan, PlanError, Slot, SlotMode, parse_flags, parse_hhmm,
+    FLAG_GRID_CHARGE,
+    FLAG_SELL,
+    DayPlan,
+    PlanError,
+    Slot,
+    SlotMode,
+    parse_flags,
+    parse_hhmm,
 )
 
 START = [700, 1300, 1600, 1900, 2000, 2100]
