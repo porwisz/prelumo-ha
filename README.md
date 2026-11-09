@@ -179,6 +179,27 @@ sieci po cenie RCE. Prelumo traktuje podbicie CWU jak ładunek, który można pr
   `{{ not is_state('switch.prelumo_dhw_control', 'on') }}` — wtedy działają tylko, gdy Prelumo
   nie steruje.
 
+### Odbiorniki sterowane (opcjonalne)
+
+Ten sam mechanizm co dla CWU, dla dowolnego urządzenia, które raz na dobę ma pobrać stałą energię
+w zadanym oknie. Opcja **Odbiorniki sterowane**, po jednym w wierszu:
+
+```
+nazwa HH:00-HH:00 kWh kW [encja] [peak]
+zmywarka 22:00-06:00 1.2 2.0 switch.zmywarka
+```
+
+- `sensor.prelumo_flex_loads` — najbliższy start; atrybut `loads`: okno, czas pracy, `best_start`,
+  `extra_cost_by_start` (o ile drożej wychodzi każda inna godzina startu), `running`.
+- `switch.prelumo_load_control` (domyślnie wył.) — wyłączony: tylko podgląd, plan baterii nie liczy
+  odbiornika osobno (jego zużycie jest w wyuczonym profilu domu). Włączony: plan baterii liczy
+  odbiornik w wybranej godzinie, o tej godzinie encja jest włączana (`homeassistant.turn_on`)
+  i wysyłane jest zdarzenie `prelumo_load_start`, po czasie kWh/kW encja jest wyłączana i idzie
+  `prelumo_load_end` (dane: `name`, `entity_id`, `kwh`). Encja jest opcjonalna — urządzenie, które
+  wymaga czegoś więcej niż włącz/wyłącz, obsłuż automatyzacją na tych zdarzeniach.
+- Uruchomiony odbiornik nie jest już przesuwany; okno jest zrobione na dany dzień po zakończeniu.
+  Historyczne zużycie urządzenia siedzi jeszcze kilka tygodni w profilu domu o dawnych godzinach.
+
 ### Strategie
 - **Autokonsumpcja** — bateria nigdy nie oddaje do sieci; może ładować się z sieci w strefie
   pozaszczytowej, jeśli to obniża koszt.

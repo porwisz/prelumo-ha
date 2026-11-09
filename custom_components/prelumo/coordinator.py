@@ -114,6 +114,7 @@ from .dhw import DhwManager
 from .ha_io import inputs as io
 from .ha_io.inverter import InverterWriter
 from .learning import learn_daily, learn_taper
+from .loads import LoadManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -235,6 +236,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.sell_seen: dict[datetime, float] = {}
         self._last_recover: datetime | None = None
         self.dhw = DhwManager(self)  # hot water boosts as flexible loads
+        self.loads = LoadManager(self)  # other devices run at the cheapest time (option)
+        self.load_control: bool | None = None  # switch; None until it has restored its state
         self.models_ready = False  # load profile / heat pump / EV models are not persisted
         self._unsub: list = []
 
@@ -363,6 +366,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.taper_events = stored.get("taper_events") or []
         self.day_forecast = stored.get("day_forecast") or {}
         self.dhw.load(stored.get("dhw"))
+        self.loads.load(stored.get("loads"))
         self.today_pv_forecast = self._load_hours(stored.get("pv_forecast_today"))
         self.yesterday_pv_forecast = self._load_hours(stored.get("pv_forecast_yesterday"))
         await learn_taper(self)
@@ -413,6 +417,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 "taper_events": self.taper_events,
                 "day_forecast": self.day_forecast,
                 "dhw": self.dhw.to_dict(),
+                "loads": self.loads.to_dict(),
                 "pv_forecast_today": {h.isoformat(): v for h, v in self.today_pv_forecast.items()},
                 "pv_forecast_yesterday": {h.isoformat(): v for h, v in self.yesterday_pv_forecast.items()},
             },
@@ -482,6 +487,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             self.save()
         if not outage:  # on the battery alone the tank is not heated up
             await self.dhw.control(now)
+            await self.loads.control(now)
         if plan is not None:
             data.active_index = plan.active_index(now)
             data.next_change, _ = plan.next_change(now)
@@ -753,6 +759,11 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         hp = self.hp_model.predict(hours, temps) if self.hp_model.coef or self.hp_model.dhw else [0.0] * horizon
         hp = [a + b for a, b in zip(hp, self.dhw.rest_of_day(hours))]
         flex = self.dhw.loads(now, hours)
+        controlled = {f.key for f in flex} if self.dhw.controlled() else set()
+        other = self.loads.loads(now, hours)
+        if self.loads.controlled():
+            controlled |= {f.key for f in other}
+        flex += other
         ev = await self._ev_forecast(now, hours, [b + h for b, h in zip(base, hp)])
         base, ps.sell_boost = self._sell_boost(now, hours, current, base, hp)
         outage = self.data.outage if self.data else False
@@ -765,14 +776,14 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                             grid_charged_this_hour=self.grid_charge_hour == now.replace(
                                 minute=0, second=0, microsecond=0),
                             sell_estimate=sell_estimate, pv_low=pv_low, flex=flex,
-                            flex_controlled=frozenset(f.key for f in flex) if self.dhw.controlled()
-                            else frozenset())
+                            flex_controlled=frozenset(controlled))
         params = self.battery_params()
         result = await self.hass.async_add_executor_job(
             run_planner, inp, params, self.strategy, self.arbitrage, current
         )
         ps.result, ps.proposed, ps.ev = result, result.plan, ev
         self.dhw.after_plan(result.flex, hours)
+        self.loads.after_plan(result.flex, hours)
         ps.pv, ps.load, ps.heat_pump = [pv[h] for h in hours], base, hp
         if self.day_forecast.get("date") != now.date().isoformat():
             today = [i for i, h in enumerate(hours) if h.date() == now.date()]

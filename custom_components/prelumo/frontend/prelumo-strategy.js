@@ -21,6 +21,19 @@ Brak podbić CWU w horyzoncie planu (albo CWU nie jest skonfigurowane: ⋮ → Z
 Zasobnik {{ state_attr('${S}','temperature') }} °C · {{ state_attr('${S}','kwh_per_degree') }} kWh/°C{{ '' if state_attr('${S}','learned') else ' (wartość domyślna, jeszcze nie wyuczona)' }} · {{ state_attr('${S}','heating_power_kw') }} kW · sterowanie Prelumo: **{{ 'tak' if state_attr('${S}','control') else 'nie (tylko podgląd)' }}**{{ ' · ' ~ state_attr('${S}','last_action') if state_attr('${S}','last_action') else '' }}
 {%- endif -%}`;
 
+const loadsTable = (S) => `{%- set ls = state_attr('${S}','loads') or [] -%}
+{%- macro hm(t) -%}{{ as_timestamp(t) | timestamp_custom('%a %H:%M') if t else '–' }}{%- endmacro -%}
+{%- if not ls -%}
+Brak odbiorników (opcja „Odbiorniki sterowane”: \`nazwa HH:00-HH:00 kWh kW [encja] [peak]\`).
+{%- else -%}
+| Odbiornik | Okno | Energia | Czas | Start | Koszt innych godzin |
+|:--|:--|--:|--:|:--|:--|
+{% for l in ls -%}
+| {{ l.name }}{{ ' ▶️' if l.running }} | {{ l.window }} | {{ '%.1f' % l.kwh }} kWh | {{ l.minutes }} min | **{{ hm(l.best_start) }}** | {% for k, v in (l.extra_cost_by_start or {}).items() %}{{ k }} {{ '+%.2f' % v }}{{ ' · ' if not loop.last }}{% endfor %} |
+{% endfor %}
+Sterowanie: **{{ 'tak' if state_attr('${S}','control') else 'nie (tylko podgląd)' }}**{{ ' · ' ~ state_attr('${S}','last_action') if state_attr('${S}','last_action') else '' }}
+{%- endif -%}`;
+
 function planView(E, I) {
   const P = E.proposed_plan, A = E.active_slot;
   const slots = `{%- set ic = {'none':'🏠','grid_charge':'🔌','sell':'💰'} -%}
@@ -194,6 +207,9 @@ function decisionsView(E, I) {
           { type: "heading", heading: "Ciepła woda (CWU)", icon: "mdi:water-boiler" },
           tile(E.dhw_control, "Prelumo steruje CWU"), tile(E.dhw_plan, "Najtańszy start podbicia"),
           md(dhwTable(E.dhw_plan)),
+          { type: "heading", heading: "Odbiorniki sterowane", icon: "mdi:power-plug-outline" },
+          tile(E.load_control, "Prelumo steruje odbiornikami"), tile(E.flex_loads, "Najbliższy start"),
+          md(loadsTable(E.flex_loads)),
           { type: "history-graph", hours_to_show: 72, entities: [{ entity: E.expected_savings, name: "Oczekiwana oszczędność" }], grid_options: { columns: "full", rows: 3 } },
         ],
       },

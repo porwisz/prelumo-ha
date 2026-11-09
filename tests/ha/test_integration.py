@@ -539,3 +539,65 @@ async def test_hot_water_boost_ends_with_the_window_and_starts_late_without_a_pl
     assert sets == [53.0]  # the tank (41 deg C) is not hot yet
     await dhw.control(day.replace(hour=16, minute=0))
     assert sets == [53.0, 40.0] and dhw.done["13-16"] == day.date().isoformat()
+
+
+async def test_flexible_load_is_planned_started_and_stopped(hass: HomeAssistant, recorder_mock) -> None:
+    """An optional load: reported while the switch is off, counted in the plan and run (entity on,
+    start event, entity off, end event) with the switch on."""
+    from unittest.mock import patch
+
+    _seed(hass)
+    hass.states.async_set("switch.pump", "off")
+    toggles: list[str] = []
+
+    async def _toggle(call: ServiceCall) -> None:
+        toggles.append(call.service)
+
+    hass.services.async_register("homeassistant", "turn_on", _toggle)
+    hass.services.async_register("homeassistant", "turn_off", _toggle)
+    events: list[str] = []
+    hass.bus.async_listen("prelumo_load_start", lambda e: events.append(f"start {e.data['name']}"))
+    hass.bus.async_listen("prelumo_load_end", lambda e: events.append(f"end {e.data['name']}"))
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={
+        "inverter_prefix": "deye_falownik", "write_action": "esphome.deye_modbus_zapisz_harmonogram",
+        "mode_select": "select.deye_falownik_ust_tryb_pracy", "mode_export_first": "Export First",
+        "mode_zero_export": "Zero Export To CT",
+        "rce_today": "sensor.rce_pse_price", "solcast_today": "sensor.solcast_pv_forecast_prognoza_na_dzisiaj",
+        "outage_entity": DEFAULTS["outage_entity"], "outage_threshold": 180.0,
+    }, options={**OPTION_DEFAULTS, "flex_loads": "pump 10:00-16:00 3 2 switch.pump"})
+    entry.add_to_hass(hass)
+    t = dt_util.now().replace(hour=8, minute=10, second=0, microsecond=0)
+    with patch("custom_components.prelumo.coordinator.dt_util.now", return_value=t):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        coord = entry.runtime_data
+        await coord.async_replan()
+        # switch off (the default): priced and reported, not in the battery plan, not run
+        (load,) = hass.states.get("sensor.prelumo_flex_loads").attributes["loads"]
+        assert load["name"] == "pump" and load["minutes"] == 90 and len(load["extra_cost_by_start"]) >= 2
+        assert coord.plan_state.result.flex[0].planned is None
+        start = dt_util.parse_datetime(load["best_start"])
+        await coord.loads.control(start + timedelta(minutes=1))
+        assert toggles == [] and events == []
+        await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.prelumo_load_control"}, blocking=True)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert coord.plan_state.result.flex[0].planned is not None
+    loads = coord.loads
+    (load,) = loads.plan
+    start = dt_util.parse_datetime(load["best_start"])
+    await loads.control(start - timedelta(minutes=1))
+    assert toggles == []
+    await loads.control(start + timedelta(minutes=1))
+    await loads.control(start + timedelta(minutes=30))
+    await hass.async_block_till_done()
+    assert toggles == ["turn_on"] and events == ["start pump"] and "load:pump" in loads.running
+    # the plan made meanwhile keeps the rest of the run in the running hours
+    hrs = [start + timedelta(hours=i) for i in range(36)]
+    (fl,) = loads.loads(start + timedelta(minutes=31), hrs)
+    assert fl.fixed == 0 and 1.9 < fl.kwh < 2.1
+    await loads.control(start + timedelta(minutes=92))
+    await hass.async_block_till_done()
+    assert toggles == ["turn_on", "turn_off"] and events == ["start pump", "end pump"]
+    assert loads.done == {"load:pump": start.date().isoformat()} and not loads.running
+    await loads.control(start + timedelta(minutes=95))
+    assert toggles == ["turn_on", "turn_off"]

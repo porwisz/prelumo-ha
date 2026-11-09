@@ -135,7 +135,8 @@
           "sell_load_margin": "Wyższe zużycie ograniczające sprzedaż",
           "pv_pessimistic": "Rezerwa domu wg pesymistycznej prognozy Solcast",
           "rce_estimate_share": "Nieopublikowane ceny RCE jako część zwykłej ceny",
-          "dhw_boosts": "Podbicia CWU"
+          "dhw_boosts": "Podbicia CWU",
+          "flex_loads": "Odbiorniki sterowane"
         },
         "data_description": {
           "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell",
@@ -158,7 +159,8 @@
           "sell_load_margin": "Przy włączonym przełączniku „Ograniczaj sprzedaż przy wyższym zużyciu”: gdy trwa slot sprzedaży, a dom (bez EV) pobiera więcej niż prognoza o tyle procent (średnia z ostatnich 15 min), plan jest przeliczany ze zmierzonym poborem dla godzin tej sprzedaży - sprzedaje mniej (wyższy limit) albo przestaje, żeby dom nie kupował prądu po sprzedaży.",
           "pv_pessimistic": "Gdy Solcast podaje pv_estimate10, rezerwa na drogie godziny liczy na tę prognozę złego dnia zamiast stałego procentu prognozy.",
           "rce_estimate_share": "Godziny bez opublikowanej ceny RCE (jutro, przed ok. 14:00) liczone są jako ten procent mediany ceny z tej samej godziny w ostatnich dniach — plan może zostawić na nie energię. 0 = brak przychodu w takich godzinach. Eksport zawsze wymaga prawdziwej ceny.",
-          "dhw_boosts": "Jedno podbicie na wpis, oddzielone ';': 'HH:00-HH:00 cel potem [peak]'. Raz w oknie zasobnik jest grzany do celu, potem trzymana jest temperatura 'potem'. 'peak' = tylko w dni robocze (drogie strefy). Przykład: 03:00-07:00 50 40; 13:00-16:00 53 40 peak"
+          "dhw_boosts": "Jedno podbicie na wpis, oddzielone ';': 'HH:00-HH:00 cel potem [peak]'. Raz w oknie zasobnik jest grzany do celu, potem trzymana jest temperatura 'potem'. 'peak' = tylko w dni robocze (drogie strefy). Przykład: 03:00-07:00 50 40; 13:00-16:00 53 40 peak",
+          "flex_loads": "Urządzenia uruchamiane raz na dobę w najtańszym czasie, po jednym w wierszu albo po ';': 'nazwa HH:00-HH:00 kWh kW [encja] [peak]'. Przykład: zmywarka 22:00-06:00 1.2 2.0 switch.zmywarka. Przy włączonym przełączniku „Sterowanie odbiornikami” encja jest włączana na czas pracy i wysyłane są zdarzenia prelumo_load_start / prelumo_load_end."
         }
       }
     },
@@ -167,7 +169,8 @@
       "invalid_plan": "Plan awaryjny jest niepoprawny (6 slotów, kolejność w kółko)",
       "invalid_soc_range": "Min SoC musi być mniejszy niż max SoC",
       "invalid_safe_soc": "Bezpieczny poziom musi być między min SoC a max SoC",
-      "invalid_dhw_boosts": "Wpisy 'HH:00-HH:00 cel potem [peak]' oddzielone ';' (pełne godziny, 10 ≤ potem ≤ cel ≤ 70)."
+      "invalid_dhw_boosts": "Wpisy 'HH:00-HH:00 cel potem [peak]' oddzielone ';' (pełne godziny, 10 ≤ potem ≤ cel ≤ 70).",
+      "invalid_flex_loads": "Wpisy 'nazwa HH:00-HH:00 kWh kW [encja] [peak]' (pełne godziny, unikalne nazwy)."
     }
   },
   "entity": {
@@ -223,6 +226,9 @@
       },
       "dhw_plan": {
         "name": "CWU: najlepszy start podbicia"
+      },
+      "flex_loads": {
+        "name": "Odbiorniki: najbliższy start"
       }
     },
     "binary_sensor": {
@@ -280,6 +286,9 @@
       },
       "dhw_control": {
         "name": "Sterowanie CWU"
+      },
+      "load_control": {
+        "name": "Sterowanie odbiornikami"
       }
     },
     "time": {

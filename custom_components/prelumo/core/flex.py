@@ -125,6 +125,68 @@ def place(
                 pick = load.previous
             pl.start = pick
             pl.cost_by_start = {s: round(c - best, 3) for s, c in cost.items()}
-        pl.planned = pl.start if controlled(load.key) or load.usual is None else load.usual
-        extra = add(pl.planned)
+        # not started by Prelumo: counted at its usual hour, or not at all when that is unknown
+        # (its consumption is then part of the learned house profile)
+        pl.planned = pl.start if controlled(load.key) else load.usual
+        if pl.planned is not None:
+            extra = add(pl.planned)
     return extra, out
+
+
+class LoadError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class TimedLoad:
+    """A device that runs once a day for a fixed energy at a fixed power, inside a window."""
+
+    name: str
+    start: int  # clock hours [start, end)
+    end: int
+    kwh: float
+    power_kw: float
+    entity: str | None = None  # turned on for the run and off after it
+    peak_only: bool = False  # only on working days
+
+    @property
+    def key(self) -> str:
+        return f"load:{self.name}"
+
+    @property
+    def window(self) -> tuple[int, int]:
+        return self.start, self.end
+
+    @property
+    def duration(self) -> timedelta:
+        return timedelta(hours=self.kwh / self.power_kw)
+
+    def covers(self, hour: int) -> bool:
+        if self.start < self.end:
+            return self.start <= hour < self.end
+        return hour >= self.start or hour < self.end
+
+
+def parse_loads(text: str) -> list[TimedLoad]:
+    """'name HH:00-HH:00 kWh kW [entity_id] [peak]; ...' - e.g.
+    'dishwasher 22:00-06:00 1.2 2.0 switch.dishwasher; pool 10:00-16:00 3 1.5'."""
+    out: list[TimedLoad] = []
+    for part in (p.strip() for p in text.replace("\n", ";").split(";")):
+        if not part:
+            continue
+        bits = part.split()
+        try:
+            name = bits[0]
+            a, b = bits[1].split("-")
+            (h0, m0), (h1, m1) = ([int(x) for x in t.split(":")] for t in (a, b))
+            kwh, kw = float(bits[2].replace(",", ".")), float(bits[3].replace(",", "."))
+        except (ValueError, IndexError) as err:
+            raise LoadError(f"bad entry: {part}") from err
+        rest = bits[4:]
+        entity = next((x for x in rest if "." in x), None)
+        flags = [x.lower() for x in rest if x != entity]
+        if (m0 or m1 or not (0 <= h0 <= 23 and 0 <= h1 <= 24) or h0 == h1 % 24 or kwh <= 0 or kw <= 0
+                or any(f != "peak" for f in flags) or any(x.name == name for x in out)):
+            raise LoadError(f"bad entry: {part}")
+        out.append(TimedLoad(name, h0, h1, kwh, kw, entity, "peak" in flags))
+    return out

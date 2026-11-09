@@ -42,6 +42,9 @@
       },
       "dhw_plan": {
         "default": "mdi:water-boiler"
+      },
+      "flex_loads": {
+        "default": "mdi:timer-play-outline"
       }
     },
     "binary_sensor": {
@@ -84,6 +87,9 @@
       },
       "dhw_control": {
         "default": "mdi:water-boiler-auto"
+      },
+      "load_control": {
+        "default": "mdi:power-plug-outline"
       }
     }
   },

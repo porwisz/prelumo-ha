@@ -22,6 +22,7 @@ SWITCHES = {
     "safe_level": ("safe_level", False, True),
     "sell_load_guard": ("sell_load_guard", False, True),
     "dhw_control": ("dhw_control", True, True),
+    "load_control": ("load_control", False, True),
 }
 
 

@@ -135,7 +135,8 @@
           "sell_load_margin": "Higher use that limits selling",
           "pv_pessimistic": "House reserve from Solcast's pessimistic forecast",
           "rce_estimate_share": "Unpublished RCE prices as a share of the usual price",
-          "dhw_boosts": "Hot water boosts"
+          "dhw_boosts": "Hot water boosts",
+          "flex_loads": "Flexible loads"
         },
         "data_description": {
           "fallback_plan": "6 entries 'HH:MM SOC MODE' separated by ';', mode: none | grid_charge | sell",
@@ -157,7 +158,8 @@
           "sell_load_margin": "With the Limit selling on higher use switch on: while a sell slot runs and the house (without the EV) draws more than the forecast by this much (mean of the last 15 min), the plan is recalculated with the measured draw for the hours of that sale - it sells less (a higher floor) or stops, so the house does not buy after the sale.",
           "pv_pessimistic": "With Solcast's pv_estimate10 available, the reserve for expensive hours counts on that forecast of a bad day instead of a fixed share of the forecast.",
           "rce_estimate_share": "Hours without a published RCE price (tomorrow, before about 14:00) count as this share of the median price of the same hour on the last days, so the plan can keep energy for them. 0 = no revenue in such hours. Exporting always needs the real price.",
-          "dhw_boosts": "One boost per entry, separated by ';': 'HH:00-HH:00 target after [peak]'. Once inside the window the tank is heated to the target, then the 'after' temperature is kept. 'peak' = only on working days (expensive zones). Example: 03:00-07:00 50 40; 13:00-16:00 53 40 peak"
+          "dhw_boosts": "One boost per entry, separated by ';': 'HH:00-HH:00 target after [peak]'. Once inside the window the tank is heated to the target, then the 'after' temperature is kept. 'peak' = only on working days (expensive zones). Example: 03:00-07:00 50 40; 13:00-16:00 53 40 peak",
+          "flex_loads": "Devices run once a day at the cheapest time, one per line or separated by ';': 'name HH:00-HH:00 kWh kW [entity_id] [peak]'. Example: dishwasher 22:00-06:00 1.2 2.0 switch.dishwasher. With the 'Flexible load control' switch on the entity is turned on for the run and the events prelumo_load_start / prelumo_load_end are fired."
         }
       }
     },
@@ -166,7 +168,8 @@
       "invalid_plan": "Backup plan is invalid (6 slots, cyclic order)",
       "invalid_soc_range": "Min SoC must be below max SoC",
       "invalid_safe_soc": "Safe level must be between min SoC and max SoC",
-      "invalid_dhw_boosts": "Use 'HH:00-HH:00 target after [peak]' entries separated by ';' (whole hours, 10 ≤ after ≤ target ≤ 70)."
+      "invalid_dhw_boosts": "Use 'HH:00-HH:00 target after [peak]' entries separated by ';' (whole hours, 10 ≤ after ≤ target ≤ 70).",
+      "invalid_flex_loads": "Use 'name HH:00-HH:00 kWh kW [entity_id] [peak]' entries (whole hours, unique names)."
     }
   },
   "entity": {
@@ -222,6 +225,9 @@
       },
       "dhw_plan": {
         "name": "Hot water: best boost start"
+      },
+      "flex_loads": {
+        "name": "Flexible loads: next start"
       }
     },
     "binary_sensor": {
@@ -279,6 +285,9 @@
       },
       "dhw_control": {
         "name": "Hot water control"
+      },
+      "load_control": {
+        "name": "Flexible load control"
       }
     },
     "time": {

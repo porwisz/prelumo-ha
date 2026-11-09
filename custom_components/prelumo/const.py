@@ -112,6 +112,7 @@ OPT_ALERT_LEAD: Final = "alert_lead_hours"
 OPT_RCE_ESTIMATE: Final = "rce_estimate_share"
 OPT_PV_LOW: Final = "pv_pessimistic"
 OPT_DHW_BOOSTS: Final = "dhw_boosts"
+OPT_FLEX_LOADS: Final = "flex_loads"
 
 OPTION_DEFAULTS: Final = {
     OPT_CAPACITY: 20.0,
@@ -164,6 +165,8 @@ OPTION_DEFAULTS: Final = {
     # hot water boosts: 'HH:00-HH:00 target after [peak]' - heat the tank to target once inside
     # the window, then keep `after`; 'peak' = only on days with expensive zones
     OPT_DHW_BOOSTS: "03:00-07:00 50 40; 13:00-16:00 53 40 peak",
+    # devices run once a day at the cheapest time: 'name HH:00-HH:00 kWh kW [entity_id] [peak]'
+    OPT_FLEX_LOADS: "",
 }
 
 # --- runtime switches / select (restored state) ------------------------

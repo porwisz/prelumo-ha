@@ -250,6 +250,11 @@ SENSORS: tuple[PrelumoSensorDescription, ...] = (
         value=lambda c: c.dhw.next_start(), attrs=lambda c: c.dhw.attrs(),
     ),
     PrelumoSensorDescription(
+        # the next start of a flexible load (option); the loads and their costs in the attributes
+        key="flex_loads", device_class=SensorDeviceClass.TIMESTAMP,
+        value=lambda c: c.loads.next_start(), attrs=lambda c: c.loads.attrs(),
+    ),
+    PrelumoSensorDescription(
         # hourly error of the consumption forecast (house + heat pump), % of the metered energy
         key="forecast_accuracy", native_unit_of_measurement=PERCENTAGE, suggested_display_precision=1,
         state_class=SensorStateClass.MEASUREMENT,

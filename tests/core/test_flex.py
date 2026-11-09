@@ -1,6 +1,8 @@
 from datetime import date, datetime, timedelta
 
-from core.flex import FlexLoad, place, spread, window_starts
+import pytest
+
+from core.flex import FlexLoad, LoadError, TimedLoad, parse_loads, place, spread, window_starts
 from core.forecast.ev import EvForecast
 from core.optimizer import BatteryParams, HourMode, Strategy
 from core.planner import PlannerInputs, run_planner
@@ -87,3 +89,24 @@ def test_planner_moves_a_boost_out_of_the_hour_the_battery_sells_in():
     # only watching: the battery plan still counts the boost at 15:00
     res = run_planner(PlannerInputs(**kw, flex=[load]), p, Strategy.MAX_GRID_TRADING, arbitrage=False)
     assert res.flex[0].start in (4, 5) and res.flex[0].planned == 6 and res.hours[6].load > 2.0
+
+
+def test_a_load_nobody_starts_and_with_no_usual_hour_is_only_priced():
+    def evaluate(extra):
+        return sum(e * p for e, p in zip(extra, [1.0, 0.2, 0.5]))
+
+    extra, (pl,) = place([FlexLoad("a", 1.0, 1.0, candidates=(0, 1, 2))], evaluate, 3, controlled=lambda k: False)
+    assert pl.start == 1 and pl.planned is None and extra == [0.0, 0.0, 0.0]
+
+
+def test_parse_loads():
+    loads = parse_loads("zmywarka 22:00-06:00 1.2 2.0 switch.zmywarka\nbasen 10:00-16:00 3 1,5 peak")
+    assert loads == [TimedLoad("zmywarka", 22, 6, 1.2, 2.0, "switch.zmywarka"),
+                     TimedLoad("basen", 10, 16, 3.0, 1.5, None, True)]
+    assert loads[0].key == "load:zmywarka" and loads[0].duration.total_seconds() == 36 * 60
+    assert loads[0].covers(23) and loads[0].covers(5) and not loads[0].covers(6)
+    assert parse_loads("") == []
+    for bad in ("a 10:00-16:00 3", "a 10:30-16:00 3 1", "a 10:00-16:00 0 1", "a 10:00-16:00 3 1 often",
+                "a 10:00-16:00 3 1; a 11:00-12:00 1 1"):
+        with pytest.raises(LoadError):
+            parse_loads(bad)

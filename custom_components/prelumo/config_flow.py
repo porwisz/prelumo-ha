@@ -56,6 +56,7 @@ from .const import (
     OPT_EV_CHEAP_ONLY,
     OPT_EV_DEFAULT_TARGET,
     OPT_FALLBACK_PLAN,
+    OPT_FLEX_LOADS,
     OPT_FORCE_SELL_PRICE,
     OPT_FULL_CHARGE_DAYS,
     OPT_GRID_EXPORT,
@@ -90,6 +91,7 @@ from .const import (
     OPTION_DEFAULTS,
 )
 from .core.dhw import DhwError, parse_boosts
+from .core.flex import LoadError, parse_loads
 from .core.plan import PlanError
 from .core.planner import parse_fallback_plan
 
@@ -237,6 +239,11 @@ class PrelumoOptionsFlow(OptionsFlow):
                 parse_boosts(user_input[OPT_DHW_BOOSTS])
             except DhwError:
                 errors[OPT_DHW_BOOSTS] = "invalid_dhw_boosts"
+            user_input.setdefault(OPT_FLEX_LOADS, "")  # a cleared field
+            try:
+                parse_loads(user_input[OPT_FLEX_LOADS])
+            except LoadError:
+                errors[OPT_FLEX_LOADS] = "invalid_flex_loads"
             if user_input[OPT_MIN_SOC] >= user_input[OPT_MAX_SOC]:
                 errors[OPT_MIN_SOC] = "invalid_soc_range"
             if not user_input[OPT_MIN_SOC] <= user_input[OPT_SAFE_SOC] < user_input[OPT_MAX_SOC]:
@@ -287,6 +294,8 @@ class PrelumoOptionsFlow(OptionsFlow):
             req(OPT_EV_CHEAP_ONLY): selector.BooleanSelector(),
             req(OPT_HP_BASE_TEMP): _num(5, 25, 0.5, "°C"),
             req(OPT_DHW_BOOSTS): str,
+            vol.Optional(OPT_FLEX_LOADS, description={"suggested_value": o[OPT_FLEX_LOADS]}): selector.TextSelector(
+                selector.TextSelectorConfig(multiline=True)),
             req(OPT_HISTORY_WEEKS): _num(1, 26, 1),
             req(OPT_HORIZON): _num(24, 48, 1, "h"),
             req(OPT_SOC_STEP): _num(1, 10, 1, "%"),
