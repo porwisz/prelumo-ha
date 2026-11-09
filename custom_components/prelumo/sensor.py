@@ -21,6 +21,7 @@ from homeassistant.util import dt as dt_util
 from . import PrelumoConfigEntry
 from .const import SLOT_WINDOW_H
 from .coordinator import PrelumoCoordinator
+from .core.accuracy import summary
 from .entity import PrelumoEntity
 
 
@@ -76,6 +77,8 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "battery_first_in_expensive_hours": bool(c.opt["battery_first_in_expensive_hours"]),
         "reserve_margin": int(c.opt["reserve_margin"]),
         "pv_trust": int(c.opt.get("pv_trust", 50)),
+        "pv_pessimistic": bool(c.opt.get("pv_pessimistic", True)),
+        "rce_estimate_share": int(c.opt.get("rce_estimate_share", 70)),
         "arbitrage_min_margin": float(c.opt.get("arbitrage_min_margin", 0.5)),
         "force_sell_price": c.force_sell_price(),
         "block_export_price": c.block_export_price(),
@@ -130,6 +133,19 @@ def _months(c: PrelumoCoordinator) -> dict[str, Any]:
 def _series(c: PrelumoCoordinator, values: list[float]) -> dict[str, Any]:
     return {"hourly": [{"start": h.isoformat(), "kwh": round(v, 3)}
                        for h, v in zip(c.plan_state.hours, values)]}
+
+
+def _accuracy_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
+    days = c.ledger.days
+    keys = ("load_fc", "load_act", "load_err", "pv_fc", "pv_act", "pv_err")
+    return {
+        "load_7_days": summary(c.ledger.last(7), "load"),
+        "load_30_days": summary(c.ledger.last(30), "load"),
+        "pv_7_days": summary(c.ledger.last(7), "pv"),
+        "pv_30_days": summary(c.ledger.last(30), "pv"),
+        "days": {d: {k: v[k] for k in keys if k in v} for d, v in sorted(days.items())[-14:] if "load_act" in v
+                 or "pv_act" in v},
+    }
 
 
 def _sum24(values: list[float]) -> float | None:
@@ -227,6 +243,13 @@ SENSORS: tuple[PrelumoSensorDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY, suggested_display_precision=1,
         value=lambda c: _sum24(c.plan_state.pv),
         attrs=lambda c: {**_series(c, c.plan_state.pv), "bias": c.pv_bias.factors},
+    ),
+    PrelumoSensorDescription(
+        # hourly error of the consumption forecast (house + heat pump), % of the metered energy
+        key="forecast_accuracy", native_unit_of_measurement=PERCENTAGE, suggested_display_precision=1,
+        state_class=SensorStateClass.MEASUREMENT,
+        value=lambda c: (summary(c.ledger.last(7), "load") or {}).get("error_pct"),
+        attrs=_accuracy_attrs,
     ),
 )
 

@@ -128,7 +128,9 @@
           "alert_soc": "Emergency charge SoC",
           "alert_lead_hours": "Lead time before an outage",
           "safe_soc": "Safe level",
-          "sell_load_margin": "Higher use that limits selling"
+          "sell_load_margin": "Higher use that limits selling",
+          "pv_pessimistic": "House reserve from Solcast's pessimistic forecast",
+          "rce_estimate_share": "Unpublished RCE prices as a share of the usual price"
         },
         "data_description": {
           "fallback_plan": "6 entries 'HH:MM SOC MODE' separated by ';', mode: none | grid_charge | sell",
@@ -147,7 +149,9 @@
           "alert_soc": "Prelumo charges the battery to this level on a weather warning and before an announced outage - with no charge price cap and no battery-first rule. 0 = off.",
           "alert_lead_hours": "How many hours before an announced outage starts the battery should already be charged.",
           "safe_soc": "With the Safe level switch on, the plan keeps the battery at this level for the long run: it charges ahead (PV or cheap hours) so the forecast use ends here and plans no house use below it; only a sale may go lower (down to min SoC when selling), and the battery is then refilled. The slots that use the battery keep the low floor (min SoC), so without the grid the inverter can still run on the battery.",
-          "sell_load_margin": "With the Limit selling on higher use switch on: while a sell slot runs and the house (without the EV) draws more than the forecast by this much (mean of the last 15 min), the plan is recalculated with the measured draw for the hours of that sale - it sells less (a higher floor) or stops, so the house does not buy after the sale."
+          "sell_load_margin": "With the Limit selling on higher use switch on: while a sell slot runs and the house (without the EV) draws more than the forecast by this much (mean of the last 15 min), the plan is recalculated with the measured draw for the hours of that sale - it sells less (a higher floor) or stops, so the house does not buy after the sale.",
+          "pv_pessimistic": "With Solcast's pv_estimate10 available, the reserve for expensive hours counts on that forecast of a bad day instead of a fixed share of the forecast.",
+          "rce_estimate_share": "Hours without a published RCE price (tomorrow, before about 14:00) count as this share of the median price of the same hour on the last days, so the plan can keep energy for them. 0 = no revenue in such hours. Exporting always needs the real price."
         }
       }
     },
@@ -205,6 +209,9 @@
       },
       "battery_cycles": {
         "name": "Battery cycles"
+      },
+      "forecast_accuracy": {
+        "name": "Consumption forecast error (7 days)"
       }
     },
     "binary_sensor": {

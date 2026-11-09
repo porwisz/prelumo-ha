@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from .compress import CAP_PENALTY, Segment, battery_held, rolling, settings_from_plan, simulate, to_day_plan
@@ -40,6 +40,10 @@ class PlannerInputs:
     full_by_h: int | None = None
     # the battery charged from the grid earlier in the running clock hour: no sale in it
     grid_charged_this_hour: bool = False
+    # guessed sell prices for hours without a published one (see tariff.estimate_sell)
+    sell_estimate: dict[datetime, float] = field(default_factory=dict)
+    # PV on a bad day (kWh/h, corrected); hours left out trust ``pv_trust`` of the forecast
+    pv_low: dict[datetime, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -134,15 +138,17 @@ def horizon_hours(now: datetime, n: int) -> list[datetime]:
 
 def build_hours(inp: PlannerInputs, hours: list[datetime]) -> tuple[list[HourInput], int]:
     missing = 0
-    # Unknown RCE (tomorrow is published ~14:00): never plan a sale on a made-up price.
-    # 0 = no revenue, so the optimiser does not charge or hold energy to sell into those hours.
-    fallback = 0.0
+    # Unknown RCE (tomorrow is published ~14:00): a cautious estimate when there is one, else
+    # 0 = no revenue - never a sale on a made-up price. The work mode checks the real price
+    # of the running hour anyway (coordinator._export_blocked).
     out = []
     for i, h in enumerate(hours):
         sell = inp.sell.get(h)
         if sell is None:
-            missing += 1
-            sell = fallback
+            sell = inp.sell_estimate.get(h)
+            if sell is None:
+                missing += 1
+                sell = 0.0
         out.append(
             HourInput(
                 start=h,
@@ -152,6 +158,7 @@ def build_hours(inp: PlannerInputs, hours: list[datetime]) -> tuple[list[HourInp
                 buy=inp.tariff.price(h),
                 sell=sell,
                 ev_battery_allowed=inp.ev.battery_allowed[i] if i < len(inp.ev.battery_allowed) else False,
+                pv_low=inp.pv_low.get(h),
             )
         )
     # first hour is partial
@@ -159,8 +166,9 @@ def build_hours(inp: PlannerInputs, hours: list[datetime]) -> tuple[list[HourInp
     if out and (0 < frac < 1 or inp.grid_charged_this_hour):
         f = out[0]
         frac = frac if 0 < frac < 1 else 1.0
-        out[0] = HourInput(f.start, f.pv * frac, f.load * frac, f.ev * frac, f.buy, f.sell, f.ev_battery_allowed,
-                           no_sell=inp.grid_charged_this_hour)
+        out[0] = replace(f, pv=f.pv * frac, load=f.load * frac, ev=f.ev * frac,
+                         pv_low=None if f.pv_low is None else f.pv_low * frac,
+                         no_sell=inp.grid_charged_this_hour)
     return out, missing
 
 
@@ -195,6 +203,9 @@ def run_planner(
         slot_cost -= CAP_PENALTY * len(tail_issues)
     if missing:
         notes.append(f"sell_price_missing_{missing}h")
+    estimated = sum(1 for h in hours if h not in inp.sell and h in inp.sell_estimate)
+    if estimated:
+        notes.append(f"sell_price_estimated_{estimated}h")
     res = PlannerResult(plan, hin, opt, segs, slot_cost, base, missing, notes, None,
                         slot_hourly, [], slot_cost - _penalties(slot_issues), slot_issues,
                         slot_costs=slot_costs(plan, day, slot_hourly),

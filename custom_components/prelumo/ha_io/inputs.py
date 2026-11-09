@@ -173,14 +173,16 @@ def read_rce(hass: HomeAssistant, entity_ids: list[str | None]) -> dict[datetime
     return out
 
 
-def read_solcast(hass: HomeAssistant, entity_ids: list[str | None], key: str = "pv_estimate") -> dict[datetime, float]:
+def read_solcast(
+    hass: HomeAssistant, entity_ids: list[str | None], key: str = "pv_estimate", fallback: bool = True
+) -> dict[datetime, float]:
     out: dict[datetime, float] = {}
     for eid in entity_ids:
         st = hass.states.get(eid) if eid else None
         if st is None:
             continue
         recs = st.attributes.get("detailedHourly") or st.attributes.get("detailedForecast") or []
-        out.update(solcast_to_hourly(recs, parse_local, key))
+        out.update(solcast_to_hourly(recs, parse_local, key, fallback))
     return out
 
 

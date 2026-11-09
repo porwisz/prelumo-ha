@@ -378,3 +378,27 @@ async def test_inverter_clock_off_raises_a_warning(hass: HomeAssistant, setup) -
     await hass.async_block_till_done()
     assert hass.states.get("binary_sensor.prelumo_clock_drift").state == "off"  # within 5 min
     assert issues.async_get_issue(DOMAIN, "clock_drift") is None
+
+
+async def test_day_forecast_is_kept_and_judged_the_next_day(hass: HomeAssistant, setup) -> None:
+    """The first plan of a day keeps what it expected; the next day it is compared with the meters."""
+    from unittest.mock import AsyncMock, patch
+
+    from custom_components.prelumo import learning
+
+    entry, _ = setup
+    coord = entry.runtime_data
+    await coord.async_replan()
+    today = dt_util.now().date()
+    assert coord.day_forecast["date"] == today.isoformat()
+    assert coord.day_forecast["load"] and set(coord.day_forecast["load"]) == set(coord.day_forecast["pv"])
+    # the next day: every forecast hour metered 1 kWh of house use and 0.5 kWh of PV
+    y0 = dt_util.start_of_local_day()
+    hours = [dt_util.parse_datetime(k) for k in coord.day_forecast["load"]]
+    with patch.object(learning.io, "hourly_kwh", AsyncMock(side_effect=[{h: 1.0 for h in hours}, {}])):
+        await learning._judge_forecast(coord, y0, y0 + timedelta(days=1), {h: 0.5 for h in hours})
+    day = coord.ledger.days[today.isoformat()]
+    if len(hours) >= 12:
+        assert day["load_act"] == len(hours) and "pv_err" in day
+    else:
+        assert "load_act" not in day

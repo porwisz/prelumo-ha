@@ -124,3 +124,29 @@ def parse_rce_records(
             p /= 1000
         out[dt] = p
     return out
+
+
+def estimate_sell(
+    hours: list[datetime], seen: dict[datetime, float], share: float, min_samples: int = 2
+) -> dict[datetime, float]:
+    """A cautious guess of the sell price for hours not published yet (tomorrow's RCE comes out
+    around 14:00): ``share`` of the median price the same clock hour had on the last days.
+
+    Only so that the plan can weigh keeping energy for tomorrow morning against selling it now;
+    hours with a real price, or fewer than ``min_samples`` past ones, are left out.
+    """
+    if share <= 0:
+        return {}
+    by_hour: dict[int, list[float]] = {}
+    for h, v in seen.items():
+        by_hour.setdefault(h.hour, []).append(v)
+    out = {}
+    for h in hours:
+        past = sorted(by_hour.get(h.hour, []))
+        if h in seen or len(past) < min_samples:
+            continue
+        n = len(past)
+        med = past[n // 2] if n % 2 else (past[n // 2 - 1] + past[n // 2]) / 2
+        if med > 0:
+            out[h] = round(med * share, 4)
+    return out

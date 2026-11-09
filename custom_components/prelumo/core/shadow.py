@@ -43,6 +43,10 @@ class ShadowLedger:
     def _window(self, days: int) -> list[dict[str, float]]:
         return [self.days[k] for k in sorted(self.days)[-days:]]
 
+    def last(self, days: int) -> list[dict[str, float]]:
+        """The records of the last ``days`` days on record."""
+        return self._window(days)
+
     def self_sufficiency(self, days: int = 30) -> float | None:
         """Share of the house's own consumption not bought from the grid (%).
 

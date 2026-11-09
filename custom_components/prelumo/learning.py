@@ -18,6 +18,7 @@ from .const import (
     OPT_HISTORY_WEEKS,
     OPT_HP_BASE_TEMP,
 )
+from .core.accuracy import day_error
 from .core.forecast.ev import EvPattern
 from .core.forecast.heatpump import HeatPumpModel
 from .core.forecast.load import LoadProfile, base_load_samples
@@ -71,6 +72,24 @@ async def learn_models(coord: PrelumoCoordinator, now: datetime) -> None:
                   coord.load_profile.sample_hours, coord.hp_model.coef, len(coord.ev_pattern.by_weekday))
 
 
+async def _judge_forecast(
+    coord: PrelumoCoordinator, y0: datetime, y1: datetime, actual_pv: dict[datetime, float]
+) -> None:
+    """Yesterday's forecast (the first plan of that day) against the meters, into the ledger."""
+    snap = coord.day_forecast
+    if snap.get("date") != y0.date().isoformat():
+        return
+    house = await io.hourly_kwh(coord.hass, [coord.inv.house], y0, y1)
+    ev = await io.hourly_kwh(coord.hass, [coord.conf.get(CONF_EV_POWER)], y0, y1)
+    actual = {"load": {h: max(0.0, v - ev.get(h, 0.0)) for h, v in house.items()}, "pv": actual_pv}
+    for name, metered in actual.items():
+        fc = {dt_util.as_local(dt): v for k, v in (snap.get(name) or {}).items()
+              if (dt := dt_util.parse_datetime(k)) is not None}
+        err = day_error(fc, metered)
+        if err is not None:
+            coord.ledger.record_energy(y0.date(), **{f"{name}_{k}": v for k, v in err.items()})
+
+
 async def learn_daily(coord: PrelumoCoordinator, now: datetime) -> None:
     """Models: at every start (they live in memory only) and once per day after that.
 
@@ -88,6 +107,7 @@ async def learn_daily(coord: PrelumoCoordinator, now: datetime) -> None:
     fc = coord.yesterday_pv_forecast
     if fc and actual_pv:
         coord.pv_bias.learn((h, fc[h], actual_pv.get(h, 0.0)) for h in fc if y0 <= h < y1)
+    await _judge_forecast(coord, y0, y1, actual_pv)
     imp = await io.hourly_energy_change(coord.hass, coord.inv.grid_import_total, y0, y1)
     exp = await io.hourly_energy_change(coord.hass, coord.inv.grid_export_total, y0, y1)
     if imp:

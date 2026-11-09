@@ -36,6 +36,9 @@
       },
       "battery_cycles": {
         "default": "mdi:battery-sync"
+      },
+      "forecast_accuracy": {
+        "default": "mdi:bullseye-arrow"
       }
     },
     "binary_sensor": {

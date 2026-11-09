@@ -79,7 +79,9 @@ from .const import (
     OPT_PRICE_AFTERNOON,
     OPT_PRICE_MORNING,
     OPT_PRICE_OFF,
+    OPT_PV_LOW,
     OPT_PV_TRUST,
+    OPT_RCE_ESTIMATE,
     OPT_RESERVE_MARGIN,
     OPT_SAFE_SOC,
     OPT_SELL_LOAD_MARGIN,
@@ -107,7 +109,7 @@ from .core.sell_guard import LoadMeter, SellBoost, boost_sell_load
 from .core.shadow import ShadowLedger
 from .core.stock import MAX_TICK_KWH, BatteryStock, account_tick
 from .core.taper import STALL_BAND, taper_from_events
-from .core.tariff import G13Tariff
+from .core.tariff import G13Tariff, estimate_sell
 from .ha_io import inputs as io
 from .ha_io.inverter import InverterWriter
 from .learning import learn_daily, learn_taper
@@ -221,6 +223,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self._plan_lock = asyncio.Lock()
         self.yesterday_pv_forecast: dict[datetime, float] = {}
         self.today_pv_forecast: dict[datetime, float] = {}
+        # what the first plan of the day expected for the day (kWh per hour): judged the next
+        # day against the meters (learning.learn_daily)
+        self.day_forecast: dict[str, Any] = {}
         # hourly RCE, kept ~3 days: for yesterday's actual cost and for the live export check
         # right after a restart (persisted, so that check is not blind until the first re-plan)
         self.sell_seen: dict[datetime, float] = {}
@@ -351,6 +356,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             self.grid_charge_hour = dt_util.parse_datetime(stored["grid_charge_hour"])
         self.ev_power_seen = stored.get("ev_power_seen")
         self.taper_events = stored.get("taper_events") or []
+        self.day_forecast = stored.get("day_forecast") or {}
+        self.today_pv_forecast = self._load_hours(stored.get("pv_forecast_today"))
+        self.yesterday_pv_forecast = self._load_hours(stored.get("pv_forecast_yesterday"))
         await learn_taper(self)
         if self.grid_energy is None:  # first run: look it up in the history
             try:
@@ -397,9 +405,21 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 "grid_charge_hour": self.grid_charge_hour.isoformat() if self.grid_charge_hour else None,
                 "ev_power_seen": self.ev_power_seen,
                 "taper_events": self.taper_events,
+                "day_forecast": self.day_forecast,
+                "pv_forecast_today": {h.isoformat(): v for h, v in self.today_pv_forecast.items()},
+                "pv_forecast_yesterday": {h.isoformat(): v for h, v in self.yesterday_pv_forecast.items()},
             },
             5,
         )
+
+    @staticmethod
+    def _load_hours(stored: dict | None) -> dict[datetime, float]:
+        out: dict[datetime, float] = {}
+        for key, value in (stored or {}).items():
+            dt = dt_util.parse_datetime(key)
+            if dt is not None:
+                out[dt_util.as_local(dt)] = float(value)
+        return out
 
     def _load_sell_seen(self, stored: dict | None) -> dict[datetime, float]:
         """Restore the recent hourly sell prices, dropping anything older than the window."""
@@ -711,6 +731,12 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         ps.fallback_active = False
 
         pv = dict(zip(hours, self.pv_bias.apply(hours, [pv_raw.get(h, 0.0) for h in hours])))
+        pv_low: dict[datetime, float] = {}
+        if o.get(OPT_PV_LOW, True):
+            low = io.read_solcast(self.hass, [c.get(CONF_SOLCAST_TODAY), c.get(CONF_SOLCAST_TOMORROW)],
+                                  "pv_estimate10", fallback=False)
+            pv_low = {h: min(pv[h], low[h] * self.pv_bias.factor(h)) for h in hours if h in low}
+        sell_estimate = estimate_sell(hours, self.sell_seen, float(o.get(OPT_RCE_ESTIMATE, 70)) / 100)
         base = self.load_profile.predict(hours)
         temps = await io.read_weather_temps(self.hass, c.get(CONF_WEATHER))
         hp = self.hp_model.predict(hours, temps) if self.hp_model.coef or self.hp_model.dhw else [0.0] * horizon
@@ -724,13 +750,21 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         inp = PlannerInputs(now, soc, pv, base, hp, ev, sell_h, self.tariff(), horizon, SLOT_WINDOW_H,
                             bool(self.grid_energy), full_by_h=alert.by_hours if alert else None,
                             grid_charged_this_hour=self.grid_charge_hour == now.replace(
-                                minute=0, second=0, microsecond=0))
+                                minute=0, second=0, microsecond=0),
+                            sell_estimate=sell_estimate, pv_low=pv_low)
         params = self.battery_params()
         result = await self.hass.async_add_executor_job(
             run_planner, inp, params, self.strategy, self.arbitrage, current
         )
         ps.result, ps.proposed, ps.ev = result, result.plan, ev
         ps.pv, ps.load, ps.heat_pump = [pv[h] for h in hours], base, hp
+        if self.day_forecast.get("date") != now.date().isoformat():
+            today = [i for i, h in enumerate(hours) if h.date() == now.date()]
+            self.day_forecast = {
+                "date": now.date().isoformat(),
+                "pv": {hours[i].isoformat(): round(pv[hours[i]], 3) for i in today},
+                "load": {hours[i].isoformat(): round(base[i] + hp[i], 3) for i in today},
+            }
         self.ledger.record_plan(now.date(), result.slot_plan_cost, result.baseline_cost)
         await self._maybe_write(current, result.plan, now, force_write, result.gain_vs_current, result.rules)
 

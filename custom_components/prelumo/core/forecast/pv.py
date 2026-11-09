@@ -51,9 +51,12 @@ class PvBias:
 
 
 def solcast_to_hourly(
-    records: Iterable[Mapping], parse_dt, key: str = "pv_estimate"
+    records: Iterable[Mapping], parse_dt, key: str = "pv_estimate", fallback: bool = True
 ) -> dict[datetime, float]:
-    """Solcast ``detailedForecast`` (kW per 30-min period) -> kWh per hour."""
+    """Solcast ``detailedForecast`` (kW per 30-min period) -> kWh per hour.
+
+    A record without ``key`` counts as its ``pv_estimate``, or is left out with ``fallback`` off.
+    """
     out: dict[datetime, float] = {}
     recs = [r for r in records if isinstance(r, Mapping) and "period_start" in r]
     if not recs:
@@ -62,11 +65,13 @@ def solcast_to_hourly(
     for r in recs:
         dt = r["period_start"] if isinstance(r["period_start"], datetime) else parse_dt(str(r["period_start"]))
         if dt is not None:
-            starts.append((dt, float(r.get(key, r.get("pv_estimate", 0.0)) or 0.0)))
-    starts.sort()
+            value = r.get(key, r.get("pv_estimate", 0.0)) if fallback else r.get(key)
+            starts.append((dt, None if value is None and not fallback else float(value or 0.0)))
+    starts.sort(key=lambda x: x[0])
     period_h = 0.5
     if len(starts) > 1:
         period_h = max(0.25, min(1.0, (starts[1][0] - starts[0][0]).total_seconds() / 3600))
+    starts = [(dt, kw) for dt, kw in starts if kw is not None]
     for dt, kw in starts:
         h = dt.replace(minute=0, second=0, microsecond=0)
         out[h] = out.get(h, 0.0) + kw * period_h

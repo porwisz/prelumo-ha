@@ -173,6 +173,7 @@ function decisionsView(E, I) {
           { type: "heading", heading: "Prognozy", icon: "mdi:crystal-ball" },
           tile(E.pv_forecast_corrected, "PV 24 h (skoryg.)", 4), tile(E.load_forecast, "Zużycie 24 h", 4),
           tile(E.ev_energy_needed, "Auto potrzebuje", 4),
+          tile(E.forecast_accuracy, "Błąd prognozy zużycia (7 dni)", 4),
           { type: "history-graph", hours_to_show: 72, entities: [{ entity: E.expected_savings, name: "Oczekiwana oszczędność" }], grid_options: { columns: "full", rows: 3 } },
         ],
       },

@@ -128,7 +128,9 @@
           "alert_soc": "SoC ładowania awaryjnego",
           "alert_lead_hours": "Wyprzedzenie przed wyłączeniem",
           "safe_soc": "Bezpieczny poziom",
-          "sell_load_margin": "Wyższe zużycie ograniczające sprzedaż"
+          "sell_load_margin": "Wyższe zużycie ograniczające sprzedaż",
+          "pv_pessimistic": "Rezerwa domu wg pesymistycznej prognozy Solcast",
+          "rce_estimate_share": "Nieopublikowane ceny RCE jako część zwykłej ceny"
         },
         "data_description": {
           "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell",
@@ -148,7 +150,9 @@
           "alert_soc": "Do tego poziomu Prelumo doładowuje baterię przy ostrzeżeniu pogodowym i przed zapowiedzianym wyłączeniem prądu — bez limitu ceny ładowania i bez reguły „bateria najpierw”. 0 = wyłączone.",
           "alert_lead_hours": "Ile godzin przed początkiem zapowiedzianego wyłączenia bateria ma już być naładowana.",
           "safe_soc": "Przy włączonym przełączniku „Bezpieczny poziom” plan długoterminowo utrzymuje baterię na tym poziomie: doładowuje ją z wyprzedzeniem (PV albo tanie godziny), tak by prognozowane zużycie kończyło się na nim, i nie planuje zużycia domu poniżej niego. Niżej może zejść tylko sprzedaż (do min. SoC przy sprzedaży), a potem bateria jest doładowywana. Sloty, w których bateria jest używana, mają niski limit (min SoC), więc bez sieci falownik dalej może pracować z baterii.",
-          "sell_load_margin": "Przy włączonym przełączniku „Ograniczaj sprzedaż przy wyższym zużyciu”: gdy trwa slot sprzedaży, a dom (bez EV) pobiera więcej niż prognoza o tyle procent (średnia z ostatnich 15 min), plan jest przeliczany ze zmierzonym poborem dla godzin tej sprzedaży - sprzedaje mniej (wyższy limit) albo przestaje, żeby dom nie kupował prądu po sprzedaży."
+          "sell_load_margin": "Przy włączonym przełączniku „Ograniczaj sprzedaż przy wyższym zużyciu”: gdy trwa slot sprzedaży, a dom (bez EV) pobiera więcej niż prognoza o tyle procent (średnia z ostatnich 15 min), plan jest przeliczany ze zmierzonym poborem dla godzin tej sprzedaży - sprzedaje mniej (wyższy limit) albo przestaje, żeby dom nie kupował prądu po sprzedaży.",
+          "pv_pessimistic": "Gdy Solcast podaje pv_estimate10, rezerwa na drogie godziny liczy na tę prognozę złego dnia zamiast stałego procentu prognozy.",
+          "rce_estimate_share": "Godziny bez opublikowanej ceny RCE (jutro, przed ok. 14:00) liczone są jako ten procent mediany ceny z tej samej godziny w ostatnich dniach — plan może zostawić na nie energię. 0 = brak przychodu w takich godzinach. Eksport zawsze wymaga prawdziwej ceny."
         }
       }
     },
@@ -206,6 +210,9 @@
       },
       "battery_cycles": {
         "name": "Cykle baterii"
+      },
+      "forecast_accuracy": {
+        "name": "Błąd prognozy zużycia (7 dni)"
       }
     },
     "binary_sensor": {

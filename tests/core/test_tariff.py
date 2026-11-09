@@ -47,3 +47,17 @@ def test_rce_pse_period_start_not_dtime():
              "business_date": "2026-10-05"}]
     parsed = parse_rce_records(recs, datetime.fromisoformat, per_mwh=False)
     assert set(parsed) == {datetime(2026, 10, 5, 18, 45), datetime(2026, 10, 5, 23, 45)}
+
+
+def test_estimate_sell_is_a_share_of_the_median_of_the_same_hour():
+    from datetime import datetime, timedelta
+
+    from core.tariff import estimate_sell
+
+    d = datetime(2026, 11, 10, 7)
+    seen = {d - timedelta(days=1): 2.0, d - timedelta(days=2): 3.0, d - timedelta(days=3): 9.0,
+            d.replace(hour=8) - timedelta(days=1): 1.0, d.replace(hour=9): 1.5,
+            d.replace(hour=9) - timedelta(days=1): 1.5}
+    est = estimate_sell([d, d.replace(hour=8), d.replace(hour=9)], seen, 0.7)
+    assert est == {d: 2.1}  # 08: one sample only, 09: the real price is known
+    assert estimate_sell([d], seen, 0.0) == {}

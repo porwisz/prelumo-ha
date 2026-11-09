@@ -144,3 +144,34 @@ def test_current_schedule_selling_after_grid_charge_breaks_the_rule():
     v: list[str] = []
     simulate(hrs, [Setting(HourMode.SELL, 70), Setting(HourMode.NORMAL, 20)], 95, BatteryParams(), violations=v)
     assert "05:00 sell_after_grid_charge_in_hour" in v
+
+
+def test_estimated_sell_price_keeps_energy_for_tomorrow_and_is_noted():
+    """Before tomorrow's RCE is out, a guessed morning price lets the plan hold energy for it
+    instead of valuing those hours at nothing."""
+    hours = [NOW.replace(minute=0) + timedelta(hours=i) for i in range(36)]
+    known = {h: 0.4 for h in hours[:10]}  # today only
+    est = {h: (2.0 if h.hour == 7 else 0.4) for h in hours[10:]}
+    kw = dict(now=NOW, soc=90, pv={h: 0.0 for h in hours}, base_load=[0.3] * 36, heat_pump=[0.0] * 36,
+              ev=EvForecast([0.0] * 36, [], [False] * 36), sell=known, tariff=G13Tariff(0.9, 1.5, 0.63))
+    p = BatteryParams(soc_step=5)
+    plain = run_planner(PlannerInputs(**kw), p, Strategy.MAX_GRID_TRADING, arbitrage=False)
+    guess = run_planner(PlannerInputs(**kw, sell_estimate=est), p, Strategy.MAX_GRID_TRADING, arbitrage=False)
+    assert "sell_price_estimated_26h" in guess.notes and guess.missing_sell_hours == 0
+    assert plain.missing_sell_hours == 26
+    seven = next(i for i, h in enumerate(hours) if h.hour == 7 and i > 10)
+    assert guess.optimum.hours[seven].mode is HourMode.SELL
+    assert plain.optimum.hours[seven].mode is not HourMode.SELL
+
+
+def test_pessimistic_pv_raises_the_reserve_kept_for_expensive_hours():
+    from core.optimizer import HourInput, expensive_reserve
+
+    d0 = datetime(2026, 11, 10, 8)
+    p = BatteryParams(battery_first_above=0.65, pv_trust=0.5, reserve_margin=0.0)
+    hrs = [HourInput(d0 + timedelta(hours=i), 2.0, 1.5, 0.0, 1.05, 0.5) for i in range(3)]
+    low = [HourInput(h.start, h.pv, h.load, h.ev, h.buy, h.sell, pv_low=0.2) for h in hrs]
+    assert expensive_reserve(low, p)[0] > expensive_reserve(hrs, p)[0]
+    # never more PV than the forecast itself
+    high = [HourInput(h.start, h.pv, h.load, h.ev, h.buy, h.sell, pv_low=5.0) for h in hrs]
+    assert expensive_reserve(high, p)[0] == 0.0

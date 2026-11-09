@@ -105,6 +105,8 @@ OPT_FORCE_SELL_PRICE: Final = "force_sell_price"
 OPT_BLOCK_EXPORT_PRICE: Final = "block_export_price"
 OPT_ALERT_SOC: Final = "alert_soc"
 OPT_ALERT_LEAD: Final = "alert_lead_hours"
+OPT_RCE_ESTIMATE: Final = "rce_estimate_share"
+OPT_PV_LOW: Final = "pv_pessimistic"
 
 OPTION_DEFAULTS: Final = {
     OPT_CAPACITY: 20.0,
@@ -150,6 +152,10 @@ OPTION_DEFAULTS: Final = {
     OPT_BLOCK_EXPORT_PRICE: 0.0,  # PLN/kWh; at or below this RCE price never Export First
     OPT_ALERT_SOC: 100,  # % to charge to on a weather alert / before a planned outage (0 = off)
     OPT_ALERT_LEAD: 2,  # h before a planned outage the battery should already be charged
+    # %; hours without a published RCE price count as this share of the usual price (0 = as 0)
+    OPT_RCE_ESTIMATE: 70,
+    # house reserve counts on Solcast's pessimistic forecast (pv_estimate10) when it is there
+    OPT_PV_LOW: True,
 }
 
 # --- runtime switches / select (restored state) ------------------------

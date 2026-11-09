@@ -98,3 +98,25 @@ def test_ev_charges_only_in_cheap_hours_like_the_car_schedule():
     assert t.off_peak_by_clock(summer.replace(hour=22))
     # the car schedule knows no weekends: Saturday 17:00 is still "peak" for it
     assert not t.off_peak_by_clock(datetime(2026, 10, 24, 17, 0))
+
+
+def test_pessimistic_solcast_records_without_the_key_are_left_out():
+    recs = [{"period_start": "2026-11-10T10:00:00", "pv_estimate": 2.0, "pv_estimate10": 0.5},
+            {"period_start": "2026-11-10T11:00:00", "pv_estimate": 2.0}]
+    parse = datetime.fromisoformat
+    assert solcast_to_hourly(recs, parse, "pv_estimate10", fallback=False) == {datetime(2026, 11, 10, 10): 0.5}
+    assert solcast_to_hourly(recs, parse, "pv_estimate10")[datetime(2026, 11, 10, 11)] == 2.0
+
+
+def test_day_error_and_summary():
+    from core.accuracy import day_error, summary
+
+    d0 = datetime(2026, 11, 9)
+    fc = {d0.replace(hour=h): 1.0 for h in range(24)}
+    act = {d0.replace(hour=h): (2.0 if h < 12 else 0.5) for h in range(24)}
+    e = day_error(fc, act)
+    assert e == {"fc": 24.0, "act": 30.0, "err": 18.0}
+    assert day_error({d0: 1.0}, act) is None  # too few hours to judge
+    s = summary([{f"load_{k}": v for k, v in e.items()}, {"pv_act": 1.0}], "load")
+    assert s == {"error_pct": 60.0, "bias_pct": -20.0, "days": 1}
+    assert summary([{}], "load") is None

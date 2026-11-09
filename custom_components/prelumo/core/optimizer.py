@@ -114,6 +114,9 @@ class HourInput:
     # no sale from the battery in it - buying and selling the same energy within the hour is
     # never planned (9 Nov: grid charge 05:00-05:48, then a sale to 06:00 and a recharge)
     no_sell: bool = False
+    # kWh the PV gives on a bad day (Solcast's 10th percentile, bias-corrected); None = unknown,
+    # the house reserve then trusts ``pv_trust`` of the forecast
+    pv_low: float | None = None
 
 
 @dataclass(frozen=True)
@@ -224,6 +227,11 @@ def force_sell(h: HourInput, p: BatteryParams) -> bool:
     return p.force_sell_above is not None and h.sell >= p.force_sell_above - 1e-9
 
 
+def trusted_pv(h: HourInput, p: BatteryParams) -> float:
+    """PV (kWh) the house reserve counts on in this hour."""
+    return h.pv * p.pv_trust if h.pv_low is None else min(h.pv, h.pv_low)
+
+
 def expensive_reserve(hours: list[HourInput], p: BatteryParams) -> list[float]:
     """Battery-side kWh to keep while selling in each hour for the house in the expensive hours.
 
@@ -245,7 +253,7 @@ def expensive_reserve(hours: list[HourInput], p: BatteryParams) -> list[float]:
             if h.buy <= p.battery_first_above + 1e-9:
                 acc = 0.0
         elif h.buy > p.battery_first_above + 1e-9:
-            acc += max(0.0, h.load - h.pv * p.pv_trust)  # house + heat pump, without the EV
+            acc += max(0.0, h.load - trusted_pv(h, p))  # house + heat pump, without the EV
             out[t] = acc * (1 + p.reserve_margin) / p.eta
         else:
             out[t] = acc * (1 + p.reserve_margin) / p.eta
@@ -261,7 +269,7 @@ def pv_risk(hours: list[HourInput], p: BatteryParams) -> list[tuple[float, float
     beforehand when it is cheaper, so a cloudy morning does not run on the expensive grid.
     """
     out: list[tuple[float, float] | None] = [None] * (len(hours) + 1)
-    if p.battery_first_above is None or p.pv_trust >= 1.0:
+    if p.battery_first_above is None or (p.pv_trust >= 1.0 and all(h.pv_low is None for h in hours)):
         return out
     thr = p.battery_first_above + 1e-9
     room = (p.max_soc - p.house_floor) / 100 * p.capacity_kwh
@@ -269,7 +277,7 @@ def pv_risk(hours: list[HourInput], p: BatteryParams) -> list[tuple[float, float
         if hours[t].buy > thr and hours[t - 1].buy <= thr:
             need, k = 0.0, t
             while k < len(hours) and hours[k].buy > thr:
-                need += max(0.0, hours[k].load - hours[k].pv * p.pv_trust)
+                need += max(0.0, hours[k].load - trusted_pv(hours[k], p))
                 k += 1
             out[t] = (min(room, need / p.eta), hours[t].buy)
     return out

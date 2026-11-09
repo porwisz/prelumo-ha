@@ -87,6 +87,14 @@ Bateria domowa nie ładuje Tesli, chyba że termin wyjazdu jest zagrożony albo 
   kupioną z sieci (bez cyklu baterii dla taniego prądu). Prelumo śledzi, czy w baterii jest energia
   z sieci (ładowanie w slocie z sieci ustawia, zejście do min. SoC kasuje); energia z PV jest
   używana normalnie. Atrybut `grid_energy_in_battery` w `sensor.prelumo_proposed_plan`.
+- **Rezerwa domu wg pesymistycznej prognozy Solcast** (domyślnie wł.) — gdy Solcast podaje
+  `pv_estimate10`, rezerwa na drogie godziny liczy na tę prognozę złego dnia (po korekcie) zamiast
+  stałego procentu „zapas na błąd prognozy PV”; bez niej działa stały procent.
+- **Nieopublikowane ceny RCE** (domyślnie 70%) — godziny bez ceny (jutro, przed ok. 14:00) liczone są
+  jako ten procent mediany ceny z tej samej godziny w ostatnich 3 dniach, więc plan może zostawić
+  energię na jutrzejszy poranek. Notatka planu `sell_price_estimated_Nh`. Eksport i tak wymaga
+  prawdziwej ceny bieżącej godziny (blokada eksportu). 0 = jak dawniej: brak przychodu.
+
 ### Ile kosztuje energia w baterii
 
 `sensor.prelumo_battery_energy_cost` prowadzi średnią ważoną kosztu nabycia: ładowanie z sieci
@@ -163,6 +171,7 @@ poniżej tej ceny RCE sprzedaż traci pieniądze.
 | `sensor.prelumo_battery_cycles` | cykle baterii (licznik falownika / pojemność); atrybuty: `last_30_days`, `by_month` |
 | `sensor.prelumo_battery_energy_cost` | średni koszt energii w baterii (zł/kWh); atrybuty: `break_even_sell_price`, `stock_kwh`, `grid_share` |
 | `sensor.prelumo_ev_energy_needed`, `_load_forecast`, `_pv_forecast_corrected` | prognozy |
+| `sensor.prelumo_forecast_accuracy` | błąd godzinowy prognozy zużycia (dom + PC) z 7 dni jako % zmierzonej energii; atrybuty: `load_30_days`, `pv_7_days`, `pv_30_days` (`error_pct`, `bias_pct`: + = prognoza za wysoka), `days` |
 | `binary_sensor.prelumo_sell_now`, `_grid_outage`, `_fallback_active`, `_alert_charge` | |
 | `select.prelumo_strategy` | autokonsumpcja / maks. handel |
 | `switch.prelumo_auto_mode` | zgoda na sterowanie (tryb pracy i zapisy) |
