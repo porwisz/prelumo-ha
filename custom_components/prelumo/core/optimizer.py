@@ -110,6 +110,10 @@ class HourInput:
     buy: float  # PLN/kWh
     sell: float  # PLN/kWh
     ev_battery_allowed: bool = False
+    # the battery already charged from the grid in this clock hour (the running hour only):
+    # no sale from the battery in it - buying and selling the same energy within the hour is
+    # never planned (9 Nov: grid charge 05:00-05:48, then a sale to 06:00 and a recharge)
+    no_sell: bool = False
 
 
 @dataclass(frozen=True)
@@ -341,7 +345,8 @@ def _transition(
         rounding += battery_export
         delivered -= battery_export
         battery_export = 0.0
-    if battery_export > EPS and (strategy is Strategy.SELF_CONSUMPTION or not may_export or s1 < p.min_sell_soc):
+    if battery_export > EPS and (strategy is Strategy.SELF_CONSUMPTION or not may_export or s1 < p.min_sell_soc
+                                 or h.no_sell):
         return None
     if battery_export > EPS and reserve > 1e-9 and (s1 - p.house_floor) / 100 * p.capacity_kwh < reserve - 1e-9:
         return None  # keep energy for the house in the coming expensive hours

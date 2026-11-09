@@ -32,6 +32,8 @@ class PlannerInputs:
     # deadline (hours from now) for the required full charge; None = anywhere in the slot window.
     # Set when the charge is for a coming power cut, which has a time of its own.
     full_by_h: int | None = None
+    # the battery charged from the grid earlier in the running clock hour: no sale in it
+    grid_charged_this_hour: bool = False
 
 
 @dataclass
@@ -148,9 +150,11 @@ def build_hours(inp: PlannerInputs, hours: list[datetime]) -> tuple[list[HourInp
         )
     # first hour is partial
     frac = 1 - (inp.now - hours[0]).total_seconds() / 3600
-    if out and 0 < frac < 1:
+    if out and (0 < frac < 1 or inp.grid_charged_this_hour):
         f = out[0]
-        out[0] = HourInput(f.start, f.pv * frac, f.load * frac, f.ev * frac, f.buy, f.sell, f.ev_battery_allowed)
+        frac = frac if 0 < frac < 1 else 1.0
+        out[0] = HourInput(f.start, f.pv * frac, f.load * frac, f.ev * frac, f.buy, f.sell, f.ev_battery_allowed,
+                           no_sell=inp.grid_charged_this_hour)
     return out, missing
 
 

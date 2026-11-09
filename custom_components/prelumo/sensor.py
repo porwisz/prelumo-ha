@@ -77,6 +77,7 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "force_sell_price": c.force_sell_price(),
         "block_export_price": c.block_export_price(),
         "grid_energy_in_battery": c.grid_energy,
+        "no_sell_this_hour": bool(r and r.hours and r.hours[0].no_sell),
         "shadow_mode": c.shadow,
         "slots": ps.proposed.as_list() if ps.proposed else None,
         "hourly": [h.as_dict() for h in r.optimum.hours] if r else None,

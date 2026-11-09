@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from core.forecast.ev import EvForecast
-from core.optimizer import BatteryParams, Strategy
+from core.optimizer import BatteryParams, HourMode, Strategy
 from core.plan import PlanError, SlotMode
 from core.planner import PlannerInputs, parse_fallback_plan, run_planner
 from core.tariff import G13Tariff
@@ -109,3 +109,37 @@ def test_full_charge_deadline_limits_the_window():
     assert max(h.soc_end for h in soon.hours[:3]) == 100
     assert "full_charge_planned" in soon.notes
     assert any(h.mode is HourMode.GRID_CHARGE for h in soon.hours[:3])
+
+
+def _morning_after_grid_charge(charged: bool):
+    """9 Nov: grid charge 05:00-05:48 to 95 %, sell price at 05 high, cheap night until 07,
+    a better sale at 07-08 - the planner sold 05:48-06:00 and recharged from 06:00."""
+    now = datetime(2026, 11, 9, 5, 48)
+    hours = [now.replace(minute=0) + timedelta(hours=i) for i in range(36)]
+    sell = {h: (1.6 if h.hour == 5 else 2.4 if h.hour in (7, 8) else 0.4) for h in hours[:20]}
+    inp = PlannerInputs(now, 95, {h: 0.0 for h in hours}, [0.8] * 36, [0.2] * 36,
+                        EvForecast([0.0] * 36, [], [False] * 36), sell, G13Tariff(0.9, 1.5, 0.63),
+                        grid_energy=True, grid_charged_this_hour=charged)
+    return run_planner(inp, BatteryParams(soc_step=2, arbitrage_min_margin=0.5), Strategy.MAX_GRID_TRADING,
+                       arbitrage=True)
+
+
+def test_no_sale_in_the_hour_the_battery_charged_from_the_grid():
+    free = _morning_after_grid_charge(False)
+    assert free.optimum.hours[0].mode is HourMode.SELL  # the scenario: without the rule it sells now
+    res = _morning_after_grid_charge(True)
+    assert res.hours[0].no_sell and not res.hours[1].no_sell
+    assert res.optimum.hours[0].battery_export < 0.06
+    assert res.plan.slots[0].mode is not SlotMode.SELL
+    assert not any("sell_after_grid_charge_in_hour" in v for v in res.slot_plan_issues)
+    assert any(h.mode is HourMode.SELL for h in res.optimum.hours[1:4])  # later sales still allowed
+
+
+def test_current_schedule_selling_after_grid_charge_breaks_the_rule():
+    from core.compress import Setting, simulate
+    from core.optimizer import HourInput
+    h0 = datetime(2026, 11, 9, 5)
+    hrs = [HourInput(h0, 0.0, 0.2, 0.0, 0.63, 1.6, no_sell=True), HourInput(h0 + timedelta(hours=1), 0.0, 1.0, 0.0, 0.63, 0.4)]
+    v: list[str] = []
+    simulate(hrs, [Setting(HourMode.SELL, 70), Setting(HourMode.NORMAL, 20)], 95, BatteryParams(), violations=v)
+    assert "05:00 sell_after_grid_charge_in_hour" in v

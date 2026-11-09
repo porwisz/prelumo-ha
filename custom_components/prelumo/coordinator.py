@@ -137,6 +137,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.sell_load_guard = False  # house above the forecast while selling limits the sale
         self.load_meter = LoadMeter()  # house draw without the EV, last minutes
         self.grid_energy: bool | None = None  # battery holds energy bought from the grid
+        self.grid_charge_hour: datetime | None = None  # clock hour the battery last charged from the grid
         self.alert_on = False  # weather warning now active
         self.planned_outage: datetime | None = None  # start of the next announced outage
         self.ev_power_seen: float | None = None  # kW, last measured EV charging power
@@ -301,6 +302,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self._sell_seen = self._load_sell_seen(stored.get("sell_seen"))
         self.last_learn = stored.get("last_learn")
         self.grid_energy = stored.get("grid_energy")
+        if stored.get("grid_charge_hour"):
+            self.grid_charge_hour = dt_util.parse_datetime(stored["grid_charge_hour"])
         self.ev_power_seen = stored.get("ev_power_seen")
         self.taper_events = stored.get("taper_events") or []
         await self._learn_taper()
@@ -346,6 +349,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 "writes": [t.isoformat() for t in self.guard.history],
                 "last_full": self.full.last_full.isoformat() if self.full.last_full else None,
                 "grid_energy": self.grid_energy,
+                "grid_charge_hour": self.grid_charge_hour.isoformat() if self.grid_charge_hour else None,
                 "ev_power_seen": self.ev_power_seen,
                 "taper_events": self.taper_events,
             },
@@ -482,6 +486,10 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             power = io.state_float(self.hass, self.inv.battery_power)
             if power is not None and power < -300:
                 new = True
+                hour = now.replace(minute=0, second=0, microsecond=0)
+                if hour != self.grid_charge_hour:
+                    self.grid_charge_hour = hour
+                    self._save()
         if new != self.grid_energy:
             self.grid_energy = new
             self._save()
@@ -724,7 +732,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
 
         alert = self.alert_charge()
         inp = PlannerInputs(now, soc, pv, base, hp, ev, sell_h, self.tariff(), horizon, SLOT_WINDOW_H,
-                            bool(self.grid_energy), full_by_h=alert.by_hours if alert else None)
+                            bool(self.grid_energy), full_by_h=alert.by_hours if alert else None,
+                            grid_charged_this_hour=self.grid_charge_hour == now.replace(
+                                minute=0, second=0, microsecond=0))
         params = self.battery_params()
         result = await self.hass.async_add_executor_job(
             run_planner, inp, params, self.strategy, self.arbitrage, current

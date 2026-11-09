@@ -162,6 +162,10 @@ def simulate(
             if h.sell <= 0:
                 # hard rule: no Export First where the RCE price is unknown (or not positive)
                 cost += broke("sell_without_price")
+            if h.no_sell:
+                # hard rule: the battery charged from the grid earlier in this clock hour - no
+                # Export First in the same hour (buy and sell the same energy)
+                cost += broke("sell_after_grid_charge_in_hour")
             if reserve[i] > 1e-9 and target < p.house_floor / 100 * cap + reserve[i] - 0.5 * max(1, p.soc_step) / 100 * cap:
                 # hard rule (reserve), independent of the forecast SoC: a sell slot may never
                 # sell below what the house needs in the following expensive hours
