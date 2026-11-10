@@ -17,6 +17,14 @@ SLOTS = [("07:00", 12000, 20, "Brak (0)"), ("13:00", 12000, 100, "Siec (1)"), ("
          ("19:00", 12000, 40, "Sprzedaz (32)"), ("20:00", 12000, 20, "Brak (0)"), ("21:00", 12000, 40, "Siec (1)")]
 
 
+def _next(hour: int, minute: int) -> datetime:
+    """The next time the clock shows hour:minute. The seeded prices and forecasts start now, so
+    a time earlier today has none (the tests then failed late in the evening, test time zone)."""
+    now = dt_util.now()
+    t = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return t if t > now else t + timedelta(days=1)
+
+
 def _seed(hass: HomeAssistant) -> list[ServiceCall]:
     hass.states.async_set(f"{P}bateria_soc", "55", {"unit_of_measurement": "%"})
     hass.states.async_set(f"{P}dom_pobor", "800", {"unit_of_measurement": "W"})
@@ -168,8 +176,7 @@ async def test_shadow_mode_never_touches_work_mode(hass: HomeAssistant, setup) -
     # 19:30 is inside the Sell slot -> Prelumo wants Export First
     from unittest.mock import patch
 
-    from homeassistant.util import dt as dt_util
-    t = dt_util.now().replace(hour=19, minute=30)
+    t = _next(19, 30)
     with patch("custom_components.prelumo.coordinator.dt_util.now", return_value=t):
         await coord.async_refresh()
     assert coord.data.desired_mode == "Export First"
@@ -276,10 +283,9 @@ async def test_export_blocked_at_a_low_sell_price(hass: HomeAssistant, setup) ->
     block threshold - checked live, so it also holds for a plan written an hour ago."""
     from unittest.mock import patch
 
-    from homeassistant.util import dt as dt_util
     entry, _ = setup
     coord = entry.runtime_data
-    t = dt_util.now().replace(hour=19, minute=30)
+    t = _next(19, 30)
     with patch("custom_components.prelumo.coordinator.dt_util.now", return_value=t):
         await coord.async_refresh()
     assert coord.data.desired_mode == "Export First"
@@ -474,7 +480,7 @@ async def test_hot_water_boost_is_started_at_the_planned_hour_and_ended(hass: Ho
         "dhw_climate": "climate.tank", "dhw_temperature": "sensor.tank_temp",
     }, options={**OPTION_DEFAULTS, "dhw_boosts": "13:00-16:00 53 40"})
     entry.add_to_hass(hass)
-    t = dt_util.now().replace(hour=9, minute=10, second=0, microsecond=0)
+    t = _next(9, 10)
     with patch("custom_components.prelumo.coordinator.dt_util.now", return_value=t):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done(wait_background_tasks=True)
@@ -566,7 +572,7 @@ async def test_flexible_load_is_planned_started_and_stopped(hass: HomeAssistant,
         "outage_entity": DEFAULTS["outage_entity"], "outage_threshold": 180.0,
     }, options={**OPTION_DEFAULTS, "flex_loads": "pump 10:00-16:00 3 2 switch.pump"})
     entry.add_to_hass(hass)
-    t = dt_util.now().replace(hour=8, minute=10, second=0, microsecond=0)
+    t = _next(8, 10)
     with patch("custom_components.prelumo.coordinator.dt_util.now", return_value=t):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done(wait_background_tasks=True)
