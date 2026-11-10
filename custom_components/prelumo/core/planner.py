@@ -198,7 +198,7 @@ def run_planner(
 
         frac = 1 - (inp.now - hours[0]).total_seconds() / 3600
         extra, placements = place(inp.flex, evaluate, len(hin), frac if 0 < frac < 1 else 1.0,
-                                  lambda key: key in inp.flex_controlled)
+                                  lambda key: key in inp.flex_controlled, [h.sell for h in hin])
         hin = with_extra(extra)
     window = max(6, min(inp.window_h, 24, len(hin)))
     full_by = window if inp.full_by_h is None else max(1, min(window, inp.full_by_h))

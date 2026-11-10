@@ -35,7 +35,7 @@ KEEP_DONE = timedelta(days=3)
 class DhwManager:
     def __init__(self, coord: PrelumoCoordinator) -> None:
         self.coord = coord
-        self.events: list[dict] = []  # heating runs seen in the history (core.dhw.heating_events)
+        self.events: list[dict] = []  # climbs of the tank temperature (core.dhw.heating_events)
         self.done: dict[str, str] = {}  # boost key -> day (ISO) whose window is already heated
         self.choice: dict[str, str] = {}  # boost key -> start (ISO hour) the last plan chose
         self.usual: dict[str, int] = {}  # boost key -> clock hour it usually starts in
@@ -75,6 +75,11 @@ class DhwManager:
         return v
 
     @property
+    def runs(self) -> list[dict]:
+        """The climbs that were heating runs."""
+        return dhw.heated(self.events)
+
+    @property
     def per_degree(self) -> float:
         return dhw.kwh_per_degree(self.events) or dhw.DEFAULT_KWH_PER_DEG
 
@@ -106,10 +111,10 @@ class DhwManager:
         boosts = self.boosts()
         if not self.controlled():  # once Prelumo starts them, "usual" stays what it was before
             for b in boosts:
-                hour = dhw.usual_start(self.events, b)
+                hour = dhw.usual_start(self.runs, b)
                 if hour is not None:
                     self.usual[b.key] = hour
-        self.profile = dhw.residual_profile(self.events, boosts, now)
+        self.profile = dhw.residual_profile(self.runs, boosts, now)
         _LOGGER.debug("Hot water: %d runs, %.3f kWh/deg, %.1f kW, usual %s",
                       len(self.events), self.per_degree, self.power_kw, self.usual)
 
@@ -118,11 +123,11 @@ class DhwManager:
 
         With a week of runs on record only that period is used: older hours still have the hot
         water in them."""
-        if not self.events:
+        if not self.runs:
             return hp
-        runs = dhw.hourly_kwh(self.events)
+        runs = dhw.hourly_kwh(self.runs)
         out = {h: max(0.0, v - runs.get(h, 0.0)) for h, v in hp.items()}
-        first = datetime.fromisoformat(self.events[0]["start"])
+        first = datetime.fromisoformat(self.runs[0]["start"])
         if now - first >= timedelta(days=7):
             out = {h: v for h, v in out.items() if h >= first}
         return out
@@ -147,7 +152,7 @@ class DhwManager:
             if not open_hours or day is None:
                 continue
             near = hours[open_hours[0]] - now <= NEAR
-            t0 = temp if near and temp is not None else (dhw.usual_start_temp(self.events, b) or temp)
+            t0 = temp if near and temp is not None else (dhw.usual_start_temp(self.runs, b) or temp)
             kwh = dhw.boost_kwh(b, t0, self.per_degree)
             starts, _ = window_starts(hours, now, b.window, kwh / self.power_kw, day_ok, done)
             starts = starts or open_hours[:1]
@@ -266,7 +271,8 @@ class DhwManager:
 
     def load(self, data: dict[str, Any] | None) -> None:
         data = data or {}
-        self.events = list(data.get("events") or [])
+        # climbs recorded before the compressor time was measured are read from the history again
+        self.events = [e for e in data.get("events") or [] if "on_h" in e]
         self.done = dict(data.get("done") or {})
         self.choice = dict(data.get("choice") or {})
         self.usual = {k: int(v) for k, v in (data.get("usual") or {}).items()}
@@ -285,8 +291,9 @@ class DhwManager:
             "kwh_per_degree": self.per_degree,
             "heating_power_kw": self.power_kw,
             "learned": dhw.kwh_per_degree(self.events) is not None,
-            "runs_seen": len(self.events),
+            "runs_seen": len(self.runs),
+            "climbs_seen": len(self.events),
             "usual_start_hour": self.usual,
             "other_reheats_kwh_by_hour": self.profile,
-            "last_runs": self.events[-6:],
+            "last_runs": self.runs[-6:],
         }

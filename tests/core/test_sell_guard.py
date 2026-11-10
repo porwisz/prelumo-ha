@@ -56,3 +56,12 @@ def test_higher_house_draw_while_selling_sells_less():
     assert boost is not None
     assert sold_hi < sold - 1  # the extra house draw is taken from the sale
     assert floor_hi >= floor  # never deeper into the battery
+
+
+def test_measured_draw_counts_for_two_hours_of_a_long_sale_only():
+    """10 Nov: one sell slot 08:00-18:00 on the inverter and a heat pump run at 08:15 (3.5 kW
+    against 1.3 forecast) raised the forecast of all 10 hours - the reserve for the expensive
+    hours could not be met any more and the plan sold nothing on a day with RCE at 4.50."""
+    out, boost = boost_sell_load([0.9] * 12, [0.4] * 12, [True] * 10 + [False] * 2, 3.5, 0.2)
+    assert boost is not None and boost.hours == 2
+    assert out[:2] == [3.1, 3.1] and out[2:] == [0.9] * 10

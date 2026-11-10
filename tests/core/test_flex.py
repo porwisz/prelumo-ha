@@ -110,3 +110,26 @@ def test_parse_loads():
                 "a 10:00-16:00 3 1; a 11:00-12:00 1 1"):
         with pytest.raises(LoadError):
             parse_loads(bad)
+
+
+def test_equal_starts_keep_out_of_the_hour_a_sale_would_pay_best_in():
+    """10 Nov: the plan sold nothing that day, every start of the boost cost the same and the
+    latest (15:00) was taken - the hour with nearly the highest RCE price."""
+    def evaluate(extra):
+        return sum(extra) * 0.65  # grid power at the same price in every hour
+
+    sell = [0.0, 0.0, 3.89, 4.5, 4.39, 3.4]
+    load = FlexLoad("a", 2.0, 2.5, candidates=(2, 3, 4))
+    assert place([load], evaluate, 6, sell=sell)[1][0].start == 2
+    # the last choice does not hold the load in a dearer hour
+    stuck = FlexLoad("a", 2.0, 2.5, candidates=(2, 3, 4), previous=4)
+    assert place([stuck], evaluate, 6, sell=sell)[1][0].start == 2
+    # equal sell prices too: the latest start, and the last choice stays
+    assert place([load], evaluate, 6, sell=[1.0] * 6)[1][0].start == 4
+    assert place([FlexLoad("a", 2.0, 2.5, candidates=(2, 3, 4), previous=3)], evaluate, 6,
+                 sell=[1.0] * 6)[1][0].start == 3
+    # a real difference in cost still decides
+    def dear_early(extra):
+        return extra[2] * 2.0 + sum(extra) * 0.65
+
+    assert place([load], dear_early, 6, sell=sell)[1][0].start == 4

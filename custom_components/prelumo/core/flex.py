@@ -92,10 +92,14 @@ def window_starts(
 def place(
     loads: list[FlexLoad], evaluate: Callable[[list[float]], float], n: int,
     first_fraction: float = 1.0, controlled: Callable[[str], bool] = lambda key: True,
+    sell: list[float] | None = None,
 ) -> tuple[list[float], list[Placement]]:
     """Price every allowed start of every load (one after another, earlier windows first).
 
     ``evaluate``: cost (PLN) of the best battery plan with the given extra kWh per hour.
+    ``sell``: sell price per hour. Among starts that cost the same the one whose hours have the
+    lowest sell price is taken (then the latest): when the plan sells nothing today, the load
+    still keeps out of the hours a sale would pay best in, should the plan change.
     Returns (extra kWh per hour as the battery plan should count it, one Placement per load).
     """
     extra = [0.0] * n
@@ -120,9 +124,16 @@ def place(
             cost = {s: evaluate(add(s)) for s in options}
             allowed = {s: cost[s] for s in load.candidates}
             best = min(allowed.values())
-            pick = max(s for s, c in allowed.items() if c <= best + TIE)
-            if load.previous in allowed and allowed[load.previous] <= best + KEEP_GAIN:
-                pick = load.previous
+            def worth(start: int, kwh: float = load.kwh, kw: float = load.power_kw) -> float:
+                """What the load's energy would earn if sold in the hours of this start (PLN)."""
+                if sell is None:
+                    return 0.0
+                return round(sum(e * max(0.0, p) for e, p in zip(spread(kwh, kw, start, n, first_fraction), sell)), 2)
+
+            pick = min((s for s, c in allowed.items() if c <= best + TIE), key=lambda s: (worth(s), -s))
+            prev = load.previous
+            if prev in allowed and allowed[prev] <= best + KEEP_GAIN and worth(prev) <= worth(pick) + KEEP_GAIN:
+                pick = prev
             pl.start = pick
             pl.cost_by_start = {s: round(c - best, 3) for s, c in cost.items()}
         # not started by Prelumo: counted at its usual hour, or not at all when that is unknown

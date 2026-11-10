@@ -8,6 +8,7 @@ the heat pump's history, so that the space-heating model is fitted on heating al
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from statistics import median, median_low
@@ -15,9 +16,14 @@ from statistics import median, median_low
 DEFAULT_KWH_PER_DEG = 0.15  # ~300 l tank, COP ~2.3
 DEFAULT_POWER_KW = 2.5
 MIN_RISE = 2.0  # deg C; smaller climbs are sensor noise or a short top-up
-RISE_START = 1.0  # deg C above the last low: the tank is being heated
+RISE_START = 1.0  # deg C above the low of the last RISE_WINDOW: the tank is being heated
+RISE_WINDOW = timedelta(minutes=15)
 RISE_END = 0.5  # deg C below the top: the run is over
 MAX_RUN = timedelta(hours=4)
+ON_KW = 0.3  # the compressor runs
+# A climb the compressor ran through for less than this share of is no heating run: the tank
+# sensor also climbs when the water mixes again after a shower or while the house is heated.
+MIN_ON_SHARE = 0.5
 LEAD = timedelta(minutes=5)  # the tank sensor reacts after the compressor has started
 KEEP_DAYS = 45
 
@@ -82,8 +88,19 @@ def _energy(power: list[tuple[datetime, float]], t0: datetime, t1: datetime) -> 
     return kwh
 
 
+def _on_hours(power: list[tuple[datetime, float]], t0: datetime, t1: datetime) -> float:
+    """Hours between t0 and t1 with the power above ON_KW."""
+    on = 0.0
+    for (a, kw), (b, _) in zip(power, [*power[1:], (t1, 0.0)]):
+        lo, hi = max(a, t0), min(b, t1)
+        if hi > lo and kw > ON_KW:
+            on += (hi - lo).total_seconds() / 3600
+    return on
+
+
 def heating_events(temp: list[tuple[datetime, float]], power: list[tuple[datetime, float]]) -> list[dict]:
-    """One dict per climb of the tank temperature: start, end (ISO), t0, t1 (deg C), kwh.
+    """One dict per climb of the tank temperature: start, end (ISO), t0, t1 (deg C), kwh and
+    on_h (hours the compressor ran meanwhile).
 
     ``temp`` / ``power``: (time, value) state changes, oldest first; power in kW.
     """
@@ -99,19 +116,26 @@ def heating_events(temp: list[tuple[datetime, float]], power: list[tuple[datetim
             kwh = _energy(power, low[0] - LEAD, top[0])
             if kwh > 0.05:
                 out.append({"start": low[0].isoformat(), "end": top[0].isoformat(),
-                            "t0": round(low[1], 1), "t1": round(top[1], 1), "kwh": round(kwh, 3)})
+                            "t0": round(low[1], 1), "t1": round(top[1], 1), "kwh": round(kwh, 3),
+                            "on_h": round(_on_hours(power, low[0] - LEAD, top[0]), 3)})
 
+    recent: deque[tuple[datetime, float]] = deque()  # the last RISE_WINDOW while not climbing
     for t, v in temp:
         if top is None:
-            if low is None or v <= low[1]:
-                low = (t, v)
-            elif v >= low[1] + RISE_START:
+            recent.append((t, v))
+            while t - recent[0][0] > RISE_WINDOW:
+                recent.popleft()
+            # the latest of the lowest readings: a tank that crept up for hours before the
+            # compressor started is measured from the start of the run, not from last night
+            low = min(reversed(recent), key=lambda x: x[1])
+            if v >= low[1] + RISE_START:
                 top = (t, v)
-        elif v >= top[1]:
+        elif v > top[1]:  # the first time at the top: a tank resting there is not being heated
             top = (t, v)
         elif v <= top[1] - RISE_END:
             close()
-            low, top = (t, v), None
+            top = None
+            recent = deque([(t, v)])
     return out  # a climb still running is left for the next look
 
 
@@ -127,17 +151,24 @@ def _dt(text: str) -> datetime:
     return datetime.fromisoformat(text)
 
 
+def heated(events: list[dict]) -> list[dict]:
+    """The climbs the compressor made: it ran for most of the climb."""
+    out = []
+    for e in events:
+        hours = (_dt(e["end"]) - _dt(e["start"]) + LEAD).total_seconds() / 3600
+        if hours > 0 and e.get("on_h", 0.0) >= MIN_ON_SHARE * hours:
+            out.append(e)
+    return out
+
+
 def kwh_per_degree(events: list[dict]) -> float | None:
-    vals = [e["kwh"] / (e["t1"] - e["t0"]) for e in events if e["t1"] - e["t0"] >= MIN_RISE]
+    vals = [e["kwh"] / (e["t1"] - e["t0"]) for e in heated(events) if e["t1"] - e["t0"] >= MIN_RISE]
     return round(median(vals), 4) if len(vals) >= 3 else None
 
 
 def power_kw(events: list[dict]) -> float | None:
-    vals = []
-    for e in events:
-        h = (_dt(e["end"]) - _dt(e["start"]) + LEAD).total_seconds() / 3600
-        if h >= 0.15:
-            vals.append(e["kwh"] / h)
+    """Power of the heat pump while it heats water: energy over the time the compressor ran."""
+    vals = [e["kwh"] / e["on_h"] for e in heated(events) if e["on_h"] >= 0.15]
     return round(median(vals), 2) if len(vals) >= 3 else None
 
 

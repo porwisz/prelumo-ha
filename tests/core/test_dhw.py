@@ -89,3 +89,35 @@ def test_boost_energy():
     assert boost_kwh(b, 43.0, 0.15) == pytest.approx(1.5)
     assert boost_kwh(b, None, 0.15) == pytest.approx(1.95)
     assert boost_kwh(b, 55.0, 0.15) == 0.0
+
+
+def test_a_climb_without_the_compressor_is_no_heating_run():
+    """After a shower the tank sensor climbs back as the water mixes (9 Nov 23:30-02:06:
+    32.4 -> 36.2 deg C with 0.05 kWh) - such climbs made a reheat look half as costly."""
+    from core.dhw import heated
+
+    runs_t, runs_p = [], []
+    for day in range(3):
+        t, p = _run(D + timedelta(days=day, hours=13), 38, 53, 45)
+        runs_t += t
+        runs_p += p
+    start = D.replace(hour=22)
+    drift = [(start, 30.0)] + [(start + timedelta(minutes=10 * i), 30.0 + 1.0 * i) for i in range(1, 7)]
+    drift.append((start + timedelta(hours=3), 34.0))
+    # and a tank creeping up all morning before a run: the run is measured from its own start
+    drift += [(D + timedelta(days=1, hours=h), 34.0 + 0.4 * (h - 1)) for h in range(2, 12)]
+    blip = [(start - timedelta(hours=1), 0.0), (start + timedelta(minutes=20), 2.5),
+            (start + timedelta(minutes=24), 0.0)]
+    events = heating_events(sorted(runs_t + drift), sorted(runs_p + blip))
+    assert len(events) == 4 and len(heated(events)) == 3
+    assert [e["t0"] for e in heated(events)] == [38, 38, 38]
+    assert kwh_per_degree(events) == pytest.approx(2.5 * 45 / 60 / 15, rel=0.05)
+    assert power_kw(events) == pytest.approx(2.5, rel=0.05)
+
+
+def test_a_tank_resting_at_the_top_does_not_stretch_the_run():
+    temp, power = _run(D.replace(hour=14, minute=18), 44.0, 53.6, 40)
+    top_at = temp[-2][0]
+    temp[-1:-1] = [(top_at + timedelta(minutes=m), 53.6) for m in (5, 10, 20)]
+    (e,) = heating_events(temp, power)
+    assert datetime.fromisoformat(e["end"]) == top_at and e["on_h"] == pytest.approx(40 / 60, abs=0.02)
