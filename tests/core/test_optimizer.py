@@ -905,3 +905,27 @@ def test_charging_above_the_price_cap_only_for_a_published_sale():
     issues: list[str] = []
     simulate(marked, settings, 48, p, grid_energy=True, violations=issues)
     assert not [v for v in issues if "grid_charge_above_price_cap" in v], issues
+
+
+def test_cycle_limit_keeps_the_best_paid_sales():
+    """10 Nov 2026 again: without a limit the plan turns the battery over ~1.4 times in 12 h. With
+    one cycle a day it still sells at the best prices (4.50 at 14:00), not at the worst."""
+    from dataclasses import replace
+
+    from core.optimizer import cap_discharge, charge_for_sale, discharged_kwh
+    p = replace(LIVE_1110, reserve_price_margin=0.3)
+    hrs = charge_for_sale(day(BUY_1110, SELL_1110, load=LOAD_1110), [True] * 12, p)
+
+    def run(hs):
+        return optimize(hs, 48, p, Strategy.MAX_GRID_TRADING, arbitrage=True, grid_energy=True)
+
+    free = run(hrs)
+    assert discharged_kwh(free.hours, p.capacity_kwh) > 1.3 * p.capacity_kwh
+    same, r, kept = cap_discharge(hrs, {D0.date(): 5 * p.capacity_kwh}, p.capacity_kwh, run)
+    assert same is hrs and kept and r.total_cost == free.total_cost  # a limit that does not bind
+    priced, r, kept = cap_discharge(hrs, {D0.date(): p.capacity_kwh}, p.capacity_kwh, run)
+    assert kept and discharged_kwh(r.hours, p.capacity_kwh, D0.date()) <= 1.02 * p.capacity_kwh
+    assert priced[0].wear_extra > 0
+    assert r.hours[2].mode is HourMode.SELL  # 14:00, the best price of the day
+    assert r.total_cost > free.total_cost  # the limit costs money, and the report shows it
+    assert r.total_cost - r.terminal_value < -20  # yet most of the gain stays

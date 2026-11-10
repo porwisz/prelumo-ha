@@ -49,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--plain", action="store_true", help="price rules off")
     ap.add_argument("--no-arbitrage", action="store_true")
     ap.add_argument("--plan", action="store_true", help="print the hourly plan of each day")
+    ap.add_argument("--cycles", type=float, default=0.0, help="full battery cycles a day (0 = no limit)")
     args = ap.parse_args(argv)
 
     sys.path.insert(0, str(args.core))
@@ -67,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     mark = getattr(opt, "charge_for_sale", None)
 
     print(f"core: {args.core}" + (f"  (not in this version: {', '.join(skipped)})" if skipped else ""))
-    print(f"{'day':<12}{'no optimiser':>14}{'optimum':>10}{'as run':>10}  rule breaks")
+    print(f"{'day':<12}{'no optimiser':>14}{'optimum':>10}{'as run':>10}{'cycles':>8}  rule breaks")
     total = [0.0, 0.0, 0.0]
     for path in args.days:
         start, soc, rows = read_day(path)
@@ -76,14 +77,22 @@ def main(argv: list[str] | None = None) -> int:
         if mark is not None and arbitrage and not args.plain:
             hours = mark(hours, [True] * len(hours), p)
         base = opt.simulate_baseline(hours, soc, p)
-        r = opt.optimize(hours, soc, p, opt.Strategy.MAX_GRID_TRADING, arbitrage, grid_energy=True)
+        def run(hs: list, _soc: float = soc) -> object:
+            return opt.optimize(hs, _soc, p, opt.Strategy.MAX_GRID_TRADING, arbitrage, grid_energy=True)
+
+        if args.cycles > 0:
+            budget = dict.fromkeys({h.start.date() for h in hours}, args.cycles * p.capacity_kwh)
+            hours, r, _ = opt.cap_discharge(hours, budget, p.capacity_kwh, run)
+        else:
+            r = run(hours)
+        cycles = sum(max(0, h.soc_start - h.soc_end) for h in r.hours) / 100
         best = r.total_cost - r.terminal_value
         issues: list[str] = []
-        run = simulate(hours, _expand(_segments(r.hours, hours, p)), soc, replace(p, require_full=False),
+        as_run = simulate(hours, _expand(_segments(r.hours, hours, p)), soc, replace(p, require_full=False),
                        grid_energy=True, violations=issues)[0] - CAP_PENALTY * len(issues)
-        for i, v in enumerate((base, best, run)):
+        for i, v in enumerate((base, best, as_run)):
             total[i] += v
-        print(f"{start:%Y-%m-%d}  {base:>12.2f}{best:>10.2f}{run:>10.2f}  {', '.join(issues)}")
+        print(f"{start:%Y-%m-%d}  {base:>12.2f}{best:>10.2f}{as_run:>10.2f}{cycles:>8.2f}  {', '.join(issues)}")
         if args.plan:
             marks = {"sell": "S", "grid_charge": "C", "normal": "."}
             print("    " + " ".join(f"{h.start:%H}{marks[h.mode.value]}{h.soc_end}" for h in r.hours))

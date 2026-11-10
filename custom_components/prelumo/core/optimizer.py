@@ -13,8 +13,9 @@ Strategies
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from functools import lru_cache
 
@@ -123,6 +124,9 @@ class HourInput:
     # grid charging pays here although the buy price is above the cap: a published sell price
     # in the coming hours earns the arbitrage margin on it (see ``charge_for_sale``)
     charge_above_cap: bool = False
+    # objective only (not in reported costs): PLN per battery-side kWh discharged in this hour,
+    # on top of the wear cost - how the daily cycle limit is kept (see ``cap_discharge``)
+    wear_extra: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -527,7 +531,8 @@ def optimize(
                         # hurdle (objective only): selling grid-charged energy must earn the margin
                         hurdle = p.arbitrage_min_margin * st.battery_export if tainted else 0.0
                         rk = risk_cost(risk[t + 1], max(0, s1 - p.house_floor) / 100 * p.capacity_kwh)
-                        v = st.cost + hurdle + hold(s1) + rk + V[t + 1][(s1, nt, nf)]
+                        limit = h.wear_extra * max(0, s0 - s1) / 100 * p.capacity_kwh
+                        v = st.cost + hurdle + limit + hold(s1) + rk + V[t + 1][(s1, nt, nf)]
                         if best is None or v < best[0]:
                             best = (v, s1, nt, nf, st)
                     if best is None:  # should not happen: idle is always allowed unless limits
@@ -554,6 +559,55 @@ def optimize(
     if track_full:
         notes.append("full_charge_planned" if full == FULL_DONE else "full_charge_not_possible_in_horizon")
     return OptimizeResult(plan, total, (s_ - lo) / 100 * p.capacity_kwh * terminal_price, strategy, arbitrage, notes)
+
+
+MAX_WEAR_EXTRA = 4.0  # PLN/kWh: a cycle limit this does not keep is left unmet (house first)
+
+
+def discharged_kwh(plan: list[HourPlan], capacity_kwh: float, day: date | None = None) -> float:
+    """Battery-side kWh the plan takes out of the battery (on ``day`` only, if given)."""
+    return sum(max(0, h.soc_start - h.soc_end) / 100 * capacity_kwh
+               for h in plan if day is None or h.start.date() == day)
+
+
+def cap_discharge(
+    hours: list[HourInput], budgets: dict[date, float], capacity_kwh: float,
+    run: Callable[[list[HourInput]], OptimizeResult],
+) -> tuple[list[HourInput], OptimizeResult, bool]:
+    """Keep the plan's discharge within ``budgets`` (battery-side kWh per calendar day).
+
+    The limit is kept with a price, not a ban: each day over its budget gets the smallest extra
+    wear cost (``HourInput.wear_extra``) that brings it within - so the cycles left go to the
+    best-paid hours, and the house is still covered where the rules demand it.
+    Returns (hours with the extra cost, the plan, all budgets kept).
+    """
+    tol = 0.02 * capacity_kwh
+    res = run(hours)
+
+    def over(r: OptimizeResult) -> list[date]:
+        return [d for d in sorted(budgets) if discharged_kwh(r.hours, capacity_kwh, d) > max(0.0, budgets[d]) + tol]
+
+    if not over(res):
+        return hours, res, True
+    extra = dict.fromkeys(budgets, 0.0)
+
+    def priced() -> list[HourInput]:
+        return [replace(h, wear_extra=extra.get(h.start.date(), 0.0)) for h in hours]
+
+    for _ in range(2):  # a day's price shifts energy into its neighbour: look twice
+        for d in over(res):
+            lo, hi = extra[d], MAX_WEAR_EXTRA
+            for _ in range(6):
+                extra[d] = (lo + hi) / 2
+                if d in over(run(priced())):
+                    lo = extra[d]
+                else:
+                    hi = extra[d]
+            extra[d] = hi
+            res = run(priced())
+        if not over(res):
+            break
+    return priced(), res, not over(res)
 
 
 def simulate_baseline(hours: list[HourInput], soc_now: float, params: BatteryParams) -> float:

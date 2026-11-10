@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from .compress import CAP_PENALTY, Segment, battery_held, rolling, settings_from_plan, simulate, to_day_plan
 from .diff import URGENT_HOURS, RuleCheck, rule_check
@@ -15,6 +15,7 @@ from .optimizer import (
     HourInput,
     OptimizeResult,
     Strategy,
+    cap_discharge,
     charge_for_sale,
     expensive_reserve,
     optimize,
@@ -50,6 +51,9 @@ class PlannerInputs:
     # itself - the others are counted at their usual hour, the best start is only reported
     flex: list[FlexLoad] = field(default_factory=list)
     flex_controlled: frozenset[str] = frozenset()
+    # daily cycle limit: battery-side kWh the battery may still give on each calendar day
+    # (today: the limit less what it has given already); a day left out has no limit
+    discharge_budget: dict[date, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -205,8 +209,18 @@ def run_planner(
         hin = with_extra(extra)
     window = max(6, min(inp.window_h, 24, len(hin)))
     full_by = window if inp.full_by_h is None else max(1, min(window, inp.full_by_h))
-    opt = optimize(hin, inp.soc, params, strategy, arbitrage, grid_energy=inp.grid_energy,
-                   full_by=full_by)
+    def run(hs: list[HourInput]) -> OptimizeResult:
+        return optimize(hs, inp.soc, params, strategy, arbitrage, grid_energy=inp.grid_energy,
+                        full_by=full_by)
+
+    limit_note = None
+    if inp.discharge_budget:
+        plain = hin
+        hin, opt, kept = cap_discharge(hin, inp.discharge_budget, params.capacity_kwh, run)
+        if hin is not plain:
+            limit_note = "cycle_limit_active" if kept else "cycle_limit_not_met"
+    else:
+        opt = run(hin)
     segs, _, tail = rolling(opt.hours, hin, inp.soc, params, window=window, grid_energy=inp.grid_energy)
     plan = to_day_plan(segs, hin, params, current, soc_now=inp.soc)
     day = hin[:window]
@@ -215,7 +229,7 @@ def run_planner(
     slot_cost = simulate(day, settings_from_plan(plan, day), inp.soc, params, detail=slot_hourly,
                          grid_energy=inp.grid_energy, violations=slot_issues)[0]
     base = simulate_baseline(day, inp.soc, params)
-    notes = list(opt.notes)
+    notes = list(opt.notes) + ([limit_note] if limit_note else [])
     tail_issues: list[str] = []
     if tail is not None:  # the last slot stops following the plan here; written again before
         notes.append(f"tail_from_{hin[tail].start:%H:%M}")

@@ -81,6 +81,8 @@ def _proposed_attrs(c: PrelumoCoordinator) -> dict[str, Any]:
         "rce_estimate_share": int(c.opt.get("rce_estimate_share", 70)),
         "arbitrage_min_margin": float(c.opt.get("arbitrage_min_margin", 0.5)),
         "force_sell_price": c.force_sell_price(),
+        "max_cycles_per_day": c.max_cycles(),
+        "cycles_today": round(c.discharged_today(dt_util.now()) / float(c.opt["capacity_kwh"]), 2),
         "block_export_price": c.block_export_price(),
         "grid_energy_in_battery": c.grid_energy,
         "no_sell_this_hour": bool(r and r.hours and r.hours[0].no_sell),

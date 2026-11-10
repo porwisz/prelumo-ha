@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.components import persistent_notification
@@ -69,6 +69,7 @@ from .const import (
     OPT_MAX_CHARGE,
     OPT_MAX_CHARGE_PRICE,
     OPT_MAX_CHARGE_SOC,
+    OPT_MAX_CYCLES,
     OPT_MAX_DISCHARGE,
     OPT_MAX_SOC,
     OPT_MAX_WRITES,
@@ -231,6 +232,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         # what the first plan of the day expected for the day (kWh per hour): judged the next
         # day against the meters (learning.learn_daily)
         self.day_forecast: dict[str, Any] = {}
+        self.discharge_day: dict[str, Any] = {}  # the discharge counter at the start of today
         # hourly RCE, kept ~3 days: for yesterday's actual cost and for the live export check
         # right after a restart (persisted, so that check is not blind until the first re-plan)
         self.sell_seen: dict[datetime, float] = {}
@@ -369,6 +371,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.ev_power_seen = stored.get("ev_power_seen")
         self.taper_events = stored.get("taper_events") or []
         self.day_forecast = stored.get("day_forecast") or {}
+        self.discharge_day = stored.get("discharge_day") or {}
         self.dhw.load(stored.get("dhw"))
         self.loads.load(stored.get("loads"))
         self.today_pv_forecast = self._load_hours(stored.get("pv_forecast_today"))
@@ -418,6 +421,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 "grid_energy": self.grid_energy,
                 "grid_charge_hour": self.grid_charge_hour.isoformat() if self.grid_charge_hour else None,
                 "ev_power_seen": self.ev_power_seen,
+                "discharge_day": self.discharge_day,
                 "taper_events": self.taper_events,
                 "day_forecast": self.day_forecast,
                 "dhw": self.dhw.to_dict(),
@@ -601,6 +605,27 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         """Lifetime kWh taken out of the battery, as the inverter counts it."""
         return io.state_float(self.hass, self.inv.battery_discharge_total)
 
+    def max_cycles(self) -> float:
+        return float(self.opt[OPT_MAX_CYCLES])
+
+    def discharged_today(self, now: datetime) -> float:
+        """kWh taken out of the battery since midnight (since the first look of the day)."""
+        total = self.battery_discharged_total()
+        if total is None:
+            return 0.0
+        day = now.date().isoformat()
+        if self.discharge_day.get("date") != day or total < self.discharge_day.get("start", 0.0):
+            self.discharge_day = {"date": day, "start": total}
+        return total - self.discharge_day["start"]
+
+    def discharge_budget(self, now: datetime, hours: list[datetime]) -> dict[date, float]:
+        """Battery-side kWh the cycle limit leaves for each day of the horizon ({} = no limit)."""
+        limit = self.max_cycles() * float(self.opt[OPT_CAPACITY])
+        if limit <= 0 or self.alert_charge() is not None:
+            return {}
+        used = self.discharged_today(now)
+        return {d: limit - (used if d == now.date() else 0.0) for d in {h.date() for h in hours}}
+
     def battery_cycles_total(self) -> float | None:
         """Full cycles since the inverter's discharge counter started."""
         dis = self.battery_discharged_total()
@@ -780,7 +805,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                             grid_charged_this_hour=self.grid_charge_hour == now.replace(
                                 minute=0, second=0, microsecond=0),
                             sell_estimate=sell_estimate, pv_low=pv_low, flex=flex,
-                            flex_controlled=frozenset(controlled))
+                            flex_controlled=frozenset(controlled),
+                            discharge_budget=self.discharge_budget(now, hours))
         params = self.battery_params()
         result = await self.hass.async_add_executor_job(
             run_planner, inp, params, self.strategy, self.arbitrage, current
