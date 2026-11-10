@@ -138,7 +138,7 @@ OPTION_DEFAULTS: Final = {
     OPT_HP_BASE_TEMP: 15.0,
     OPT_HISTORY_WEEKS: 6,
     OPT_HORIZON: 36,
-    OPT_MAX_WRITES: 6,
+    OPT_MAX_WRITES: 12,  # hourly buy/sell turns need a roll of the 6 slots every ~4 h
     OPT_SOC_TOLERANCE: 5,
     OPT_FALLBACK_PLAN: "05:00 20 none; 13:00 20 none; 16:00 20 none; 19:00 20 none; 22:00 20 none; 23:00 20 none",
     OPT_STALE_HOURS: 6,
