@@ -107,7 +107,8 @@ def test_a_day_of_hourly_replans_rolls_the_slots_within_the_write_limit():
             r.evaluate_current(current)
         soc = r.current_hourly[0]["soc"]  # the inverter runs the schedule it has
     first_day = [t for t in g.history if t.date() == START.date()]
-    assert len(first_day) <= 4, first_day
+    # 5 since the sales in the cheap hours (0.1.65): more segments in the day, one more roll
+    assert len(first_day) <= 5, first_day
 
 
 def test_change_only_far_ahead_waits():

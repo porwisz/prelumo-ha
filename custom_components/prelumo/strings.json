@@ -140,7 +140,7 @@
         },
         "data_description": {
           "fallback_plan": "6 entries 'HH:MM SOC MODE' separated by ';', mode: none | grid_charge | sell",
-          "max_grid_charge_price": "The battery charges from the grid only when the buy price is at or below this. 0 = lowest G13 price.",
+          "max_grid_charge_price": "The battery charges from the grid only when the buy price is at or below this. 0 = lowest G13 price. With grid arbitrage on, a dearer hour may charge too when a published RCE price in the next hours earns the arbitrage margin on it.",
           "sell_min_power_kw": "A sell slot limits all battery output (the house too) to its power: kettle + oven above it would run on the grid. Sell slots never get less.",
           "min_sell_soc": "The battery never sells to the grid below this level.",
           "min_gain": "A new plan is written only if it is cheaper than the inverter's current schedule by at least this much per 24 h.",
@@ -150,7 +150,7 @@
           "ev_cheap_hours_only": "The car's own charging schedule (e.g. Tesla off-peak) charges only in G13 off-peak hours by the clock - it pauses at the afternoon peak and goes on in the evening while plugged in. The plan expects the car's load only in those hours.",
           "reserve_margin": "With battery first on: the battery sells only above the forecast house and heat-pump need for the remaining expensive hours, plus this margin.",
           "arbitrage_min_margin": "Energy bought from the grid is sold only when the sale earns at least this much per kWh over its purchase price (after losses and wear). Applies with grid arbitrage on.",
-          "force_sell_price": "Above this RCE price the battery sells past the reserve for the expensive hours - the house then buys from the grid, because the sale earns more. 0 = off.",
+          "force_sell_price": "Above this RCE price the battery sells past the reserve for the expensive hours - the house then buys from the grid, because the sale earns more. 0 = by the prices: the reserve is sold when the RCE price beats the expensive buy price by the reserve margin.",
           "block_export_price": "At or below this RCE price Prelumo never selects Export First - checked live every 30 s, also when the plan is old. No price for the hour blocks exporting too.",
           "alert_soc": "Prelumo charges the battery to this level on a weather warning and before an announced outage - with no charge price cap and no battery-first rule. 0 = off.",
           "alert_lead_hours": "How many hours before an announced outage starts the battery should already be charged.",

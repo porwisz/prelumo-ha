@@ -15,6 +15,7 @@ from .optimizer import (
     HourInput,
     OptimizeResult,
     Strategy,
+    charge_for_sale,
     expensive_reserve,
     optimize,
     simulate_baseline,
@@ -187,6 +188,8 @@ def run_planner(
 ) -> PlannerResult:
     hours = horizon_hours(inp.now, inp.horizon_h)
     hin, missing = build_hours(inp, hours)
+    if strategy is Strategy.MAX_GRID_TRADING and arbitrage:
+        hin = charge_for_sale(hin, [h in inp.sell for h in hours], params)
     placements: list[Placement] = []
     if inp.flex:
         def with_extra(extra: list[float]) -> list[HourInput]:
@@ -272,7 +275,7 @@ def rule_breaks(
             if res > 1e-9 and slot.soc < params.house_floor + res / params.capacity_kwh * 100 - half_step:
                 broke.append("sell_below_expensive_reserve")
         if (slot.mode is SlotMode.GRID_CHARGE and params.max_grid_charge_price is not None
-                and h.buy > params.max_grid_charge_price + 1e-9):
+                and h.buy > params.max_grid_charge_price + 1e-9 and not h.charge_above_cap):
             broke.append("grid_charge_above_price_cap")
         if slot.mode is SlotMode.NONE and battery_held(h, slot.soc, params):
             broke.append("battery_held_in_expensive_hour")

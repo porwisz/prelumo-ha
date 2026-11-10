@@ -306,6 +306,10 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             sell_min_power_kw=float(o.get(OPT_SELL_MIN_POWER, 6.0)),
             pv_trust=float(o.get(OPT_PV_TRUST, 50)) / 100,
             force_sell_above=self.force_sell_price(),
+            # no set price: the prices decide - the reserve yields when the sale beats the
+            # expensive purchase by the reserve margin
+            reserve_price_margin=(float(o[OPT_RESERVE_MARGIN]) / 100
+                                  if self.force_sell_price() is None else None),
         )
 
     def force_sell_price(self) -> float | None:

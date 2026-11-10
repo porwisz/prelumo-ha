@@ -13,7 +13,7 @@ Strategies
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from functools import lru_cache
@@ -83,6 +83,9 @@ class BatteryParams:
     # Sell price from which battery-first stops holding energy back: at this price selling beats
     # saving the expensive purchase, so the hour may export down to ``min_sell_soc``. None = off.
     force_sell_above: float | None = None
+    # The same, worked out from the prices: the hour sells past the reserve when its sell price
+    # is at least the buy price of the expensive hours the reserve is for x (1 + this). None = off.
+    reserve_price_margin: float | None = None
     # BMS charge taper: (from SoC %, max battery-side kW) - the last % charge slowly (measured
     # on the Deye: 99 -> 100 % takes ~30 min)
     charge_taper: tuple[tuple[int, float], ...] = ((90, 5.5), (95, 3.0), (98, 1.5), (99, 0.5))
@@ -117,6 +120,9 @@ class HourInput:
     # kWh the PV gives on a bad day (Solcast's 10th percentile, bias-corrected); None = unknown,
     # the house reserve then trusts ``pv_trust`` of the forecast
     pv_low: float | None = None
+    # grid charging pays here although the buy price is above the cap: a published sell price
+    # in the coming hours earns the arbitrage margin on it (see ``charge_for_sale``)
+    charge_above_cap: bool = False
 
 
 @dataclass(frozen=True)
@@ -222,9 +228,54 @@ def hold_cost(soc: float, p: BatteryParams) -> float:
         + SAFE_DEBT_COST * max(0.0, floor - soc))
 
 
-def force_sell(h: HourInput, p: BatteryParams) -> bool:
-    """Is the sell price high enough to sell instead of holding the energy for the house?"""
-    return p.force_sell_above is not None and h.sell >= p.force_sell_above - 1e-9
+def sell_free(hours: list[HourInput], p: BatteryParams) -> list[bool]:
+    """Per hour: is the sell price high enough to sell instead of holding the energy for the house?
+
+    Either the set price (``force_sell_above``) or, with ``reserve_price_margin``, the price of
+    the purchases the energy would save: the dearest buy price of the expensive run the hour
+    is in (or that follows it), plus the margin.
+    """
+    out = [False] * len(hours)
+    if p.battery_first_above is None:
+        return out
+    peak = 0.0  # dearest buy price of the expensive run from this hour on
+    for t in range(len(hours) - 1, -1, -1):
+        h = hours[t]
+        expensive = h.buy > p.battery_first_above + 1e-9
+        if expensive:
+            peak = max(peak, h.buy)
+        if p.force_sell_above is not None and h.sell >= p.force_sell_above - 1e-9:
+            out[t] = True
+        elif p.reserve_price_margin is not None and peak > 0:
+            out[t] = h.sell >= peak * (1 + p.reserve_price_margin) - 1e-9
+        if not expensive:
+            peak = 0.0
+    return out
+
+
+CHARGE_FOR_SALE_HOURS = 12  # a sale this far ahead may justify charging above the price cap
+
+
+def charge_for_sale(hours: list[HourInput], published: list[bool], p: BatteryParams) -> list[HourInput]:
+    """Mark the hours above the grid-charge price cap where charging still pays.
+
+    The cap keeps the battery from buying at any but the cheapest price. With high sell prices
+    the cheap hours are too few to fill it (charging power is limited), so an hour above the cap
+    may charge when a *published* sell price within CHARGE_FOR_SALE_HOURS earns
+    ``arbitrage_min_margin`` after losses and wear - never on an estimated price.
+    """
+    if p.max_grid_charge_price is None:
+        return hours
+    out = list(hours)
+    for t, h in enumerate(hours):
+        if h.buy <= p.max_grid_charge_price + 1e-9:
+            continue
+        need = h.buy + p.arbitrage_min_margin
+        ahead = range(t + 1, min(len(hours), t + 1 + CHARGE_FOR_SALE_HOURS))
+        if any(published[k] and hours[k].sell * p.roundtrip_efficiency - p.wear_cost >= need - 1e-9
+               for k in ahead):
+            out[t] = replace(h, charge_above_cap=True)
+    return out
 
 
 def trusted_pv(h: HourInput, p: BatteryParams) -> float:
@@ -243,9 +294,10 @@ def expensive_reserve(hours: list[HourInput], p: BatteryParams) -> list[float]:
     if p.battery_first_above is None:
         return out
     acc = 0.0
+    free = sell_free(hours, p)
     for t in range(len(hours) - 1, -1, -1):
         h = hours[t]
-        if force_sell(h, p):
+        if free[t]:
             # this hour may monetise the whole reserve: at this price the sale beats saving the
             # expensive purchases it was kept for (``min_sell_soc`` still protects the battery).
             # Earlier hours keep reserving for the later expensive hours - they are not at a spike.
@@ -293,7 +345,7 @@ def risk_cost(risk: tuple[float, float] | None, stored_kwh: float) -> float:
 
 def _transition(
     p: BatteryParams, h: HourInput, s0: int, s1: int, strategy: Strategy, may_export: bool,
-    reserve: float = 0.0, grid_energy: bool = False,
+    reserve: float = 0.0, grid_energy: bool = False, free: bool = False,
 ) -> _Step | None:
     delta = (s1 - s0) / 100 * p.capacity_kwh  # battery side
     if delta > 0:
@@ -322,10 +374,10 @@ def _transition(
 
     # Expensive hour + battery-first: the battery covers the house fully (down to min SoC)
     if p.battery_first_above is not None and h.buy > p.battery_first_above + 1e-9:
-        if bus > 0 and s0 > p.house_floor and base_deficit > EPS:
+        if bus > 0 and s0 > p.house_floor and base_deficit > EPS and not h.charge_above_cap:
             return None  # charging while the house would buy at this price
         # at a high enough sell price the battery exports instead of covering the house
-        if bus <= 0 and not force_sell(h, p):
+        if bus <= 0 and not free:
             need = min(base_deficit if ev_blocked else deficit, p.max_discharge_kw * p.eta)
             step_kwh = max(1, p.soc_step) / 100 * p.capacity_kwh * p.eta
             # SoC-grid rounding either way: a shortfall below one step is bought (the inverter
@@ -338,10 +390,12 @@ def _transition(
                 rounding = over
                 delivered = need
 
-    if (grid_energy and p.max_grid_charge_price is not None
+    if (grid_energy and p.max_grid_charge_price is not None and delivered - deficit <= EPS
             and h.buy <= p.max_grid_charge_price + 1e-9 and min(delivered, deficit) > EPS):
         # cheap hour: energy bought from the grid waits for the expensive hours - a battery
-        # cycle to save the cheap price makes no sense (rounding below one SoC step is allowed)
+        # cycle to save the cheap price makes no sense (rounding below one SoC step is allowed).
+        # A sale is another matter: a sell slot covers the house on its way (the heat pump
+        # runs in the cheap hours), and the sell price there may be the best of the day.
         if min(delivered, deficit) > max(1, p.soc_step) / 100 * p.capacity_kwh * p.eta + EPS:
             return None
     battery_export = max(0.0, delivered - deficit)
@@ -367,7 +421,8 @@ def _transition(
         rate = min(p.sell_min_power_kw, p.max_discharge_kw, p.grid_export_kw + deficit)
         if delivered < rate * (1 - SELL_THEN_BUY_KWH / deficit) - 1e-6:
             return None
-    if grid_charge > EPS and p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9:
+    if (grid_charge > EPS and p.max_grid_charge_price is not None
+            and h.buy > p.max_grid_charge_price + 1e-9 and not h.charge_above_cap):
         return None
     if ev_blocked and delivered > base_deficit + EPS:
         return None
@@ -422,6 +477,7 @@ def optimize(
 
     T = len(hours)
     reserve = expensive_reserve(hours, p)
+    free = sell_free(hours, p)
     risk = pv_risk(hours, p)
     # State = (soc, holds grid energy, full charge FULL_*). The full state is only tracked when a
     # periodic full charge (BMS balancing) is required; otherwise it stays FULL_DONE.
@@ -461,7 +517,7 @@ def optimize(
                     may_export = arbitrage or not tainted
                     best = None
                     for s1 in grid:
-                        st = _transition(p, h, s0, s1, strategy, may_export, reserve[t], tainted)
+                        st = _transition(p, h, s0, s1, strategy, may_export, reserve[t], tainted, free[t])
                         if st is None:
                             continue
                         nt = tainted or st.grid_charge > EPS

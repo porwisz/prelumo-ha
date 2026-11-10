@@ -28,6 +28,7 @@ from .optimizer import (
     max_charge_kwh,
     pv_risk,
     risk_cost,
+    sell_free,
 )
 from .plan import MAX_POWER_W, SLOT_COUNT, DayPlan, Slot, SlotMode
 
@@ -135,6 +136,7 @@ def simulate(
     traj = []
     sold_since_cheap = 0.0  # battery energy exported since the last cheap hour
     reserve = expensive_reserve(hours, p)
+    free = sell_free(hours, p)
     risks = pv_risk(hours, p) if risk else []
     run_kw = sell_kw
     for i, (h, st) in enumerate(zip(hours, settings)):
@@ -144,7 +146,9 @@ def simulate(
             return CAP_PENALTY
 
         expensive = p.battery_first_above is not None and h.buy > p.battery_first_above + 1e-9
-        if not expensive:
+        if not expensive or free[i]:
+            # a sell price that beats the purchases the reserve would save: it is given up on
+            # purpose, the house buying afterwards breaks no rule
             sold_since_cheap = 0.0
         target = st.soc / 100 * cap
         hi = p.max_soc / 100 * cap
@@ -180,7 +184,8 @@ def simulate(
                 cost += broke("sell_below_reserve")
         # the inverter charges from the grid whenever a grid-charge slot is active - it knows
         # nothing about prices - so a merge that charges above the cap must be rejected
-        over_cap = p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9
+        over_cap = (p.max_grid_charge_price is not None and h.buy > p.max_grid_charge_price + 1e-9
+                    and not h.charge_above_cap)
         if (st.mode is HourMode.NORMAL and battery_held(h, st.soc, p)):
             # hard rule (battery first in expensive hours): no floor above min SoC there
             cost += broke("battery_held_in_expensive_hour")
@@ -221,13 +226,15 @@ def simulate(
             imp += shift
             exp += shift
         exp = min(exp, p.grid_export_kw)
-        if bus < 0:
-            sold_since_cheap += max(0.0, min(-bus, -g))  # the part of the discharge that was exported
+        sold = max(0.0, min(-bus, -g)) if bus < 0 else 0.0  # the part of the discharge that was exported
+        if not free[i]:
+            sold_since_cheap += sold
         cheap = p.max_grid_charge_price is not None and h.buy <= p.max_grid_charge_price + 1e-9
         to_house = min(-bus, max(0.0, net)) if bus < 0 else 0.0
-        if grid_energy and cheap and to_house > max(1, p.soc_step) / 100 * cap * eta + 0.1:
+        if grid_energy and cheap and sold <= 0.1 and to_house > max(1, p.soc_step) / 100 * cap * eta + 0.1:
             # hard rule: grid energy in the battery waits for the expensive hours (no cycle to
-            # save the cheap price); below one SoC step it is rounding, as in the optimiser
+            # save the cheap price); below one SoC step it is rounding, as in the optimiser.
+            # Not while it is sold: a sell slot covers the house on its way
             cost += broke("grid_energy_used_in_cheap_hour")
         if st.mode is HourMode.GRID_CHARGE and bus > 0:
             grid_energy = True

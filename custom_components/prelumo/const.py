@@ -154,7 +154,7 @@ OPTION_DEFAULTS: Final = {
     OPT_BATTERY_FIRST: True,  # expensive hours: house from battery, never buy to sell later
     OPT_ARBITRAGE_MARGIN: 0.5,  # PLN/kWh, min. profit to sell energy bought from the grid
     OPT_RESERVE_MARGIN: 30,  # %, extra on top of the forecast house need in expensive hours
-    OPT_FORCE_SELL_PRICE: 0.0,  # PLN/kWh; above this RCE price sell even past the house reserve (0 = off)
+    OPT_FORCE_SELL_PRICE: 0.0,  # PLN/kWh; above this RCE price sell even past the house reserve (0 = by the prices)
     OPT_BLOCK_EXPORT_PRICE: 0.0,  # PLN/kWh; at or below this RCE price never Export First
     OPT_ALERT_SOC: 100,  # % to charge to on a weather alert / before a planned outage (0 = off)
     OPT_ALERT_LEAD: 2,  # h before a planned outage the battery should already be charged

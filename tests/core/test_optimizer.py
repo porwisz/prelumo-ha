@@ -832,3 +832,76 @@ def test_safe_level_small_spread_does_not_dip():
     hrs = day([0.6] * 24, sell)
     r = optimize(hrs, 40, _safe(), Strategy.MAX_GRID_TRADING)
     assert all(h.soc_end >= 40 for h in r.hours)
+
+
+LIVE_1110 = BatteryParams(capacity_kwh=26.25, min_soc=20, max_soc=98, max_charge_kw=8, max_discharge_kw=10,
+                          roundtrip_efficiency=0.9, wear_cost=0.1, soc_step=2, max_grid_charge_price=0.6257,
+                          min_sell_soc=20, safe_soc=40, pv_trust=0.5, battery_first_above=0.6257,
+                          reserve_margin=0.3, arbitrage_min_margin=0.5, sell_min_power_kw=6.0)
+# 10 Nov 2026 from 12:00: buy, RCE, house + heat pump (it runs in the cheap hours 13-16)
+BUY_1110 = [0.9048] + [0.6257] * 3 + [1.4961] * 5 + [0.6257] * 3
+SELL_1110 = [3.6, 3.89, 4.5, 4.39, 3.4, 3.18, 2.62, 2.65, 2.61, 1.55, 1.29, 1.03]
+LOAD_1110 = [0.77, 3.94, 2.17, 2.72, 1.69, 1.08, 1.03, 0.93, 1.14, 1.59, 0.78, 0.55]
+
+
+def test_grid_energy_is_sold_in_a_cheap_hour_while_the_house_draws():
+    """Live, 10 Nov 2026: RCE 4.50 at 14:00, buying at 0.63 - and no sale, because the battery
+    held grid energy and the heat pump drew 2 kWh in that cheap hour ("grid energy waits for
+    the expensive hours"). That rule is about cycling for the house, not about a sale."""
+    hrs = day(BUY_1110, SELL_1110, load=LOAD_1110)
+    r = optimize(hrs, 48, LIVE_1110, Strategy.MAX_GRID_TRADING, arbitrage=True, grid_energy=True)
+    assert r.hours[2].mode is HourMode.SELL and r.hours[2].battery_export > 5
+    settings = [hour_setting(h, i, None, LIVE_1110) for h, i in zip(r.hours, hrs)]
+    issues: list[str] = []
+    simulate(hrs, settings, 48, LIVE_1110, grid_energy=True, violations=issues)
+    assert not [v for v in issues if "grid_energy_used_in_cheap_hour" in v], issues
+    # for the house alone the grid energy still waits
+    quiet = day(BUY_1110, [0.3] * 12, load=LOAD_1110)
+    q = optimize(quiet, 48, LIVE_1110, Strategy.MAX_GRID_TRADING, arbitrage=True, grid_energy=True)
+    assert all(h.soc_end >= h.soc_start - 2 for h in q.hours[1:4])
+
+
+def test_reserve_yields_to_a_sell_price_above_the_expensive_purchase():
+    """With ``reserve_price_margin`` the reserve is sold when the sale beats the purchases it
+    would save by the margin (3.40 against 1.50), and kept when it does not (1.60)."""
+    from dataclasses import replace
+
+    from core.optimizer import expensive_reserve, sell_free
+    hrs = day(BUY_1110, SELL_1110, load=LOAD_1110)
+    p = replace(LIVE_1110, reserve_price_margin=0.3)
+    assert expensive_reserve(hrs, LIVE_1110)[4] > 0  # off by default
+    free = sell_free(hrs, p)  # 13:00 and 14:00 have no expensive hour next: nothing to free
+    assert free[0] and all(free[3:9]) and expensive_reserve(hrs, p)[4] == 0.0
+    r = optimize(hrs, 48, p, Strategy.MAX_GRID_TRADING, arbitrage=True, grid_energy=True)
+    held = optimize(hrs, 48, LIVE_1110, Strategy.MAX_GRID_TRADING, arbitrage=True, grid_energy=True)
+    assert r.total_cost - r.terminal_value < held.total_cost - held.terminal_value - 10
+    assert min(h.soc_end for h in r.hours[4:9]) <= 22  # the afternoon peak sells to the floor
+    low = day(BUY_1110, [1.6] * 12, load=LOAD_1110)
+    assert not any(sell_free(low, p)[4:9]) and expensive_reserve(low, p)[4] > 0
+    # the simulator agrees: the house buying after such a sale breaks no rule
+    settings = [hour_setting(h, i, None, p) for h, i in zip(r.hours, hrs)]
+    issues: list[str] = []
+    simulate(hrs, settings, 48, p, grid_energy=True, violations=issues)
+    assert not [v for v in issues if "house_buys_after_sale" in v or "sell_below_reserve" in v], issues
+
+
+def test_charging_above_the_price_cap_only_for_a_published_sale():
+    from dataclasses import replace
+
+    from core.optimizer import charge_for_sale
+    hrs = day(BUY_1110, SELL_1110, load=LOAD_1110)
+    p = replace(LIVE_1110, reserve_price_margin=0.3)
+    marked = charge_for_sale(hrs, [True] * 12, p)
+    # 12:00 (0.90, sale at 4.50 ahead) and the afternoon peak up to 19:00 (1.50, 2.61 at 20:00);
+    # not 20:00 itself: 1.55 at 21:00 does not pay for a purchase at 1.50
+    assert [h.start.hour for h in marked if h.charge_above_cap] == [0, 4, 5, 6, 7]
+    assert not any(h.charge_above_cap for h in charge_for_sale(hrs, [False] * 12, p))  # estimates
+    plain = optimize(hrs, 48, p, Strategy.MAX_GRID_TRADING, arbitrage=True, grid_energy=True)
+    r = optimize(marked, 48, p, Strategy.MAX_GRID_TRADING, arbitrage=True, grid_energy=True)
+    assert plain.hours[0].mode is not HourMode.GRID_CHARGE
+    assert r.hours[0].mode is HourMode.GRID_CHARGE
+    assert r.total_cost - r.terminal_value < plain.total_cost - plain.terminal_value - 3
+    settings = [hour_setting(h, i, None, p) for h, i in zip(r.hours, marked)]
+    issues: list[str] = []
+    simulate(marked, settings, 48, p, grid_energy=True, violations=issues)
+    assert not [v for v in issues if "grid_charge_above_price_cap" in v], issues

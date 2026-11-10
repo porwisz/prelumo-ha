@@ -140,7 +140,7 @@
         },
         "data_description": {
           "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell",
-          "max_grid_charge_price": "Bateria ładuje się z sieci tylko gdy cena zakupu ≤ tej wartości. 0 = najniższa cena z taryfy G13.",
+          "max_grid_charge_price": "Bateria ładuje się z sieci tylko gdy cena zakupu ≤ tej wartości. 0 = najniższa cena z taryfy G13. Przy włączonym arbitrażu droższa godzina też może ładować, gdy opublikowana cena RCE w najbliższych godzinach daje na tym marżę arbitrażu.",
           "sell_min_power_kw": "Slot sprzedaży ogranicza całą moc baterii (także dla domu) do swojej mocy: czajnik + piekarnik ponad nią pobierają z sieci. Sloty sprzedaży nigdy nie dostają mniej.",
           "min_sell_soc": "Bateria nie sprzedaje do sieci poniżej tego poziomu.",
           "min_gain": "Nowy plan trafia do falownika tylko, gdy jest tańszy od obecnego o co najmniej tyle zł na 24 h.",
@@ -151,7 +151,7 @@
           "pv_trust": "Przed drogimi godzinami bateria trzyma tyle, ile dom zużyje w nich, gdyby PV dało tylko ten procent prognozy (100% = pełne zaufanie do prognozy). Ładuje wcześniej, gdy to tańsze.",
           "reserve_margin": "Przy włączonej opcji „bateria najpierw”: bateria sprzedaje tylko ponad prognozowane zużycie domu i pompy ciepła w pozostałych drogich godzinach, plus ten margines.",
           "arbitrage_min_margin": "Energia kupiona z sieci jest sprzedawana tylko, gdy sprzedaż daje co najmniej tyle zł na kWh ponad cenę zakupu (po stratach i zużyciu baterii). Działa przy włączonym arbitrażu.",
-          "force_sell_price": "Gdy cena RCE jest wyższa, bateria sprzedaje mimo rezerwy na drogie godziny — dom dokupuje wtedy z sieci, bo sprzedaż zarabia więcej. 0 = wyłączone.",
+          "force_sell_price": "Gdy cena RCE jest wyższa, bateria sprzedaje mimo rezerwy na drogie godziny — dom dokupuje wtedy z sieci, bo sprzedaż zarabia więcej. 0 = według cen: rezerwa jest sprzedawana, gdy cena RCE przewyższa drogą cenę zakupu o margines rezerwy.",
           "block_export_price": "Przy cenie RCE ≤ tej wartości Prelumo nigdy nie ustawia Export First — sprawdzane na żywo co 30 s, także gdy plan jest stary. Brak ceny dla danej godziny też blokuje eksport.",
           "alert_soc": "Do tego poziomu Prelumo doładowuje baterię przy ostrzeżeniu pogodowym i przed zapowiedzianym wyłączeniem prądu — bez limitu ceny ładowania i bez reguły „bateria najpierw”. 0 = wyłączone.",
           "alert_lead_hours": "Ile godzin przed początkiem zapowiedzianego wyłączenia bateria ma już być naładowana.",
