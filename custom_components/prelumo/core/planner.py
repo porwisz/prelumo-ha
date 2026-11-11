@@ -16,6 +16,7 @@ from .optimizer import (
     OptimizeResult,
     Strategy,
     cap_discharge,
+    cap_export,
     charge_for_sale,
     expensive_reserve,
     optimize,
@@ -54,6 +55,9 @@ class PlannerInputs:
     # daily cycle limit: battery-side kWh the battery may still give on each calendar day
     # (today: the limit less what it has given already); a day left out has no limit
     discharge_budget: dict[date, float] = field(default_factory=dict)
+    # "sell no more than the PV produced in the month": kWh each (year, month) has left now -
+    # PV produced less energy exported so far. None = the limit is off
+    export_room: dict[tuple[int, int], float] | None = None
 
 
 @dataclass
@@ -221,6 +225,12 @@ def run_planner(
             limit_note = "cycle_limit_active" if kept else "cycle_limit_not_met"
     else:
         opt = run(hin)
+    sell_note = None
+    if inp.export_room is not None:
+        plain = hin
+        hin, opt, kept = cap_export(hin, inp.export_room, params.capacity_kwh, run)
+        if hin is not plain:
+            sell_note = "sell_within_pv_active" if kept else "sell_within_pv_not_met"
     segs, _, tail = rolling(opt.hours, hin, inp.soc, params, window=window, grid_energy=inp.grid_energy)
     plan = to_day_plan(segs, hin, params, current, soc_now=inp.soc)
     day = hin[:window]
@@ -229,7 +239,7 @@ def run_planner(
     slot_cost = simulate(day, settings_from_plan(plan, day), inp.soc, params, detail=slot_hourly,
                          grid_energy=inp.grid_energy, violations=slot_issues)[0]
     base = simulate_baseline(day, inp.soc, params)
-    notes = list(opt.notes) + ([limit_note] if limit_note else [])
+    notes = list(opt.notes) + [n for n in (limit_note, sell_note) if n]
     tail_issues: list[str] = []
     if tail is not None:  # the last slot stops following the plan here; written again before
         notes.append(f"tail_from_{hin[tail].start:%H:%M}")

@@ -107,6 +107,7 @@ OPT_RESERVE_MARGIN: Final = "reserve_margin"
 OPT_ARBITRAGE_MARGIN: Final = "arbitrage_min_margin"
 OPT_FORCE_SELL_PRICE: Final = "force_sell_price"
 OPT_MAX_CYCLES: Final = "max_cycles_per_day"
+OPT_SELL_WITHIN_PV: Final = "sell_within_pv"
 OPT_BLOCK_EXPORT_PRICE: Final = "block_export_price"
 OPT_ALERT_SOC: Final = "alert_soc"
 OPT_ALERT_LEAD: Final = "alert_lead_hours"
@@ -157,6 +158,7 @@ OPTION_DEFAULTS: Final = {
     OPT_RESERVE_MARGIN: 30,  # %, extra on top of the forecast house need in expensive hours
     OPT_FORCE_SELL_PRICE: 0.0,  # PLN/kWh; above this RCE price sell even past the house reserve (0 = by the prices)
     OPT_MAX_CYCLES: 2.0,  # full battery cycles a calendar day (discharged kWh / capacity), 0 = no limit
+    OPT_SELL_WITHIN_PV: False,  # a calendar month's export never above its PV production
     OPT_BLOCK_EXPORT_PRICE: 0.0,  # PLN/kWh; at or below this RCE price never Export First
     OPT_ALERT_SOC: 100,  # % to charge to on a weather alert / before a planned outage (0 = off)
     OPT_ALERT_LEAD: 2,  # h before a planned outage the battery should already be charged

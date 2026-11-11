@@ -127,6 +127,9 @@ class HourInput:
     # objective only (not in reported costs): PLN per battery-side kWh discharged in this hour,
     # on top of the wear cost - how the daily cycle limit is kept (see ``cap_discharge``)
     wear_extra: float = 0.0
+    # objective only: PLN per kWh exported to the grid in this hour - how the monthly limit
+    # "sell no more than the PV produced" is kept (see ``cap_export``)
+    sell_extra: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -531,7 +534,8 @@ def optimize(
                         # hurdle (objective only): selling grid-charged energy must earn the margin
                         hurdle = p.arbitrage_min_margin * st.battery_export if tainted else 0.0
                         rk = risk_cost(risk[t + 1], max(0, s1 - p.house_floor) / 100 * p.capacity_kwh)
-                        limit = h.wear_extra * max(0, s0 - s1) / 100 * p.capacity_kwh
+                        limit = (h.wear_extra * max(0, s0 - s1) / 100 * p.capacity_kwh
+                                 + h.sell_extra * st.grid_export)
                         v = st.cost + hurdle + limit + hold(s1) + rk + V[t + 1][(s1, nt, nf)]
                         if best is None or v < best[0]:
                             best = (v, s1, nt, nf, st)
@@ -607,6 +611,64 @@ def cap_discharge(
             res = run(priced())
         if not over(res):
             break
+    return priced(), res, not over(res)
+
+
+MAX_SELL_EXTRA = 10.0  # PLN/kWh: above any sell price - what is still exported then is PV surplus
+
+Month = tuple[int, int]  # (year, month)
+
+
+def month_of(d: datetime) -> Month:
+    return (d.year, d.month)
+
+
+def exported_kwh(plan: list[HourPlan], month: Month | None = None) -> float:
+    """kWh the plan sends to the grid (in ``month`` only, if given)."""
+    return sum(h.grid_export for h in plan if month is None or month_of(h.start) == month)
+
+
+def cap_export(
+    hours: list[HourInput], room: dict[Month, float], capacity_kwh: float,
+    run: Callable[[list[HourInput]], OptimizeResult],
+) -> tuple[list[HourInput], OptimizeResult, bool]:
+    """Keep the plan's export within what the PV produces in the calendar month.
+
+    ``room``: kWh the month has left before the plan starts (PV produced less energy exported
+    so far; negative = already oversold); a month left out starts at 0. The plan may export
+    that plus the PV forecast of its own hours in the month.
+
+    Kept with a price, as the cycle limit is: a month over its budget gets the smallest cost per
+    exported kWh (``HourInput.sell_extra``) that brings it within - the worst-paid sales go first.
+    Returns (hours with the extra cost, the plan, all budgets kept).
+    """
+    budgets: dict[Month, float] = {}
+    for h in hours:
+        m = month_of(h.start)
+        budgets[m] = budgets.get(m, room.get(m, 0.0)) + h.pv
+    tol = 0.02 * capacity_kwh
+    res = run(hours)
+
+    def over(r: OptimizeResult) -> list[Month]:
+        return [m for m in sorted(budgets) if exported_kwh(r.hours, m) > max(0.0, budgets[m]) + tol]
+
+    if not over(res):
+        return hours, res, True
+    extra = dict.fromkeys(budgets, 0.0)
+
+    def priced() -> list[HourInput]:
+        return [replace(h, sell_extra=extra[month_of(h.start)]) for h in hours]
+
+    for m in over(res):
+        lo, hi = 0.0, MAX_SELL_EXTRA
+        for _ in range(8):
+            extra[m] = (lo + hi) / 2
+            if m in over(run(priced())):
+                lo = extra[m]
+            else:
+                hi = extra[m]
+        extra[m] = hi
+        res = run(priced())
     return priced(), res, not over(res)
 
 

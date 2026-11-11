@@ -114,6 +114,11 @@ poniżej tej ceny RCE sprzedaż traci pieniądze.
   sprzedaje mimo rezerwy na drogie godziny; dom dokupuje wtedy z sieci, bo sprzedaż zarabia więcej.
   Dotyczy tylko godziny piku — godziny wcześniejsze nadal trzymają rezerwę. Min. SoC przy
   sprzedaży obowiązuje zawsze.
+- **Sprzedaż nie większa niż produkcja PV** (domyślnie wył.) — w miesiącu kalendarzowym plan
+  oddaje do sieci nie więcej, niż wyprodukowało PV: liczniki falownika (suma PV − suma oddania
+  od początku miesiąca) plus prognoza PV na planowane godziny. Limit jest trzymany ceną, nie
+  zakazem — gdy zapas się kończy, odpadają najgorzej płatne sprzedaże. Atrybuty
+  `pv_this_month` / `export_this_month` na `sensor.prelumo_proposed_plan`.
 - **Cena blokady eksportu** (domyślnie 0) — przy RCE ≤ tej wartości Prelumo nigdy nie ustawia
   Export First. Plan i tak nie planuje sprzedaży bez dodatniej ceny (twarda reguła
   `sell_without_price`), ale ten próg jest sprawdzany **na żywo co 30 s**, więc działa też wtedy,

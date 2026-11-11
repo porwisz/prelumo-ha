@@ -87,6 +87,7 @@ from .const import (
     OPT_SAFE_SOC,
     OPT_SELL_LOAD_MARGIN,
     OPT_SELL_MIN_POWER,
+    OPT_SELL_WITHIN_PV,
     OPT_SOC_STEP,
     OPT_SOC_TOLERANCE,
     OPT_STALE_HOURS,
@@ -233,6 +234,9 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         # day against the meters (learning.learn_daily)
         self.day_forecast: dict[str, Any] = {}
         self.discharge_day: dict[str, Any] = {}  # the discharge counter at the start of today
+        # the PV and grid-export counters at the start of this month ("sell within PV")
+        self.month_start: dict[str, Any] = {}
+        self.month_energy_seen: tuple[float, float] | None = None  # (PV, export) kWh this month
         # hourly RCE, kept ~3 days: for yesterday's actual cost and for the live export check
         # right after a restart (persisted, so that check is not blind until the first re-plan)
         self.sell_seen: dict[datetime, float] = {}
@@ -372,6 +376,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.taper_events = stored.get("taper_events") or []
         self.day_forecast = stored.get("day_forecast") or {}
         self.discharge_day = stored.get("discharge_day") or {}
+        self.month_start = stored.get("month_start") or {}
         self.dhw.load(stored.get("dhw"))
         self.loads.load(stored.get("loads"))
         self.today_pv_forecast = self._load_hours(stored.get("pv_forecast_today"))
@@ -422,6 +427,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 "grid_charge_hour": self.grid_charge_hour.isoformat() if self.grid_charge_hour else None,
                 "ev_power_seen": self.ev_power_seen,
                 "discharge_day": self.discharge_day,
+                "month_start": self.month_start,
                 "taper_events": self.taper_events,
                 "day_forecast": self.day_forecast,
                 "dhw": self.dhw.to_dict(),
@@ -626,6 +632,47 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         used = self.discharged_today(now)
         return {d: limit - (used if d == now.date() else 0.0) for d in {h.date() for h in hours}}
 
+    def sell_within_pv(self) -> bool:
+        return bool(self.opt[OPT_SELL_WITHIN_PV])
+
+    async def month_energy(self, now: datetime) -> tuple[float, float] | None:
+        """(PV produced, energy exported) in kWh this calendar month, by the inverter's counters.
+
+        The counters' values at the start of the month are worked out once from the recorder's
+        statistics (so a restart or switching the option on mid-month still sees the whole
+        month) and kept; without statistics the month is counted from now.
+        """
+        pv = io.state_float(self.hass, self.inv.pv_total)
+        exp = io.state_float(self.hass, self.inv.grid_export_total)
+        if pv is None or exp is None:
+            return None
+        month = f"{now:%Y-%m}"
+        ms = self.month_start
+        if ms.get("month") != month or pv < ms.get("pv", 0.0) or exp < ms.get("export", 0.0):
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            done = {"pv": 0.0, "export": 0.0}
+            for key, entity in (("pv", self.inv.pv_total), ("export", self.inv.grid_export_total)):
+                try:
+                    done[key] = sum((await io.hourly_energy_change(self.hass, entity, start, now)).values())
+                except Exception:  # no recorder / no statistics: count from now
+                    _LOGGER.debug("No statistics for %s, the month is counted from now", entity)
+            ms = self.month_start = {"month": month, "pv": pv - done["pv"], "export": exp - done["export"]}
+            self.save()
+        self.month_energy_seen = (pv - ms["pv"], exp - ms["export"])
+        return self.month_energy_seen
+
+    async def export_room(self, now: datetime) -> dict[tuple[int, int], float] | None:
+        """kWh this month may still export before the plan's own PV: produced less exported.
+
+        None = the limit is off. With the counters unavailable nothing is assumed produced:
+        the plan then sells only what its own hours' PV covers.
+        """
+        if not self.sell_within_pv():
+            self.month_energy_seen = None
+            return None
+        seen = await self.month_energy(now)
+        return {(now.year, now.month): seen[0] - seen[1] if seen else 0.0}
+
     def battery_cycles_total(self) -> float | None:
         """Full cycles since the inverter's discharge counter started."""
         dis = self.battery_discharged_total()
@@ -800,13 +847,15 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
             ev.battery_allowed = [True] * len(hours)
 
         alert = self.alert_charge()
+        export_room = await self.export_room(now)
         inp = PlannerInputs(now, soc, pv, base, hp, ev, sell_h, self.tariff(), horizon, SLOT_WINDOW_H,
                             bool(self.grid_energy), full_by_h=alert.by_hours if alert else None,
                             grid_charged_this_hour=self.grid_charge_hour == now.replace(
                                 minute=0, second=0, microsecond=0),
                             sell_estimate=sell_estimate, pv_low=pv_low, flex=flex,
                             flex_controlled=frozenset(controlled),
-                            discharge_budget=self.discharge_budget(now, hours))
+                            discharge_budget=self.discharge_budget(now, hours),
+                            export_room=export_room)
         params = self.battery_params()
         result = await self.hass.async_add_executor_job(
             run_planner, inp, params, self.strategy, self.arbitrage, current

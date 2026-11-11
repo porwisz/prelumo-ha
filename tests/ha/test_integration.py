@@ -607,3 +607,27 @@ async def test_flexible_load_is_planned_started_and_stopped(hass: HomeAssistant,
     assert loads.done == {"load:pump": start.date().isoformat()} and not loads.running
     await loads.control(start + timedelta(minutes=95))
     assert toggles == ["turn_on", "turn_off"]
+
+
+async def test_sell_within_pv_counts_the_month_from_the_inverter_counters(hass: HomeAssistant, setup) -> None:
+    """With the option on the plan gets the month's room: PV produced less energy exported, by
+    the inverter's counters (from the first look when the recorder has no statistics yet)."""
+    from unittest.mock import patch
+
+    entry, _ = setup
+    coord = entry.runtime_data
+    assert await coord.export_room(dt_util.now()) is None  # off by default
+    hass.states.async_set(f"{P}suma_pv", "1000", {"unit_of_measurement": "kWh"})
+    hass.states.async_set(f"{P}suma_siec_oddanie", "400", {"unit_of_measurement": "kWh"})
+    now = dt_util.now()
+    with patch.object(coord, "sell_within_pv", return_value=True):
+        assert await coord.export_room(now) == {(now.year, now.month): 0.0}
+        hass.states.async_set(f"{P}suma_pv", "1012.5", {"unit_of_measurement": "kWh"})
+        hass.states.async_set(f"{P}suma_siec_oddanie", "403", {"unit_of_measurement": "kWh"})
+        assert await coord.export_room(now) == {(now.year, now.month): 9.5}
+        resp = await hass.services.async_call(DOMAIN, "replan", {}, blocking=True, return_response=True)
+        assert resp["error"] is None, resp
+        await hass.async_block_till_done()
+        attrs = hass.states.get("sensor.prelumo_proposed_plan").attributes
+        assert attrs["sell_within_pv"] is True
+        assert (attrs["pv_this_month"], attrs["export_this_month"]) == (12.5, 3.0)

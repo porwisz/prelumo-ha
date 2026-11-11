@@ -929,3 +929,53 @@ def test_cycle_limit_keeps_the_best_paid_sales():
     assert r.hours[2].mode is HourMode.SELL  # 14:00, the best price of the day
     assert r.total_cost > free.total_cost  # the limit costs money, and the report shows it
     assert r.total_cost - r.terminal_value < -20  # yet most of the gain stays
+
+
+def test_sell_within_pv_keeps_the_month_and_the_best_paid_sales():
+    """10 Nov 2026 with "sell no more than the PV produced": with plenty of room in the month the
+    plan is untouched; with 10 kWh left the export stops there and goes to the best price; with
+    none left (and no PV in the horizon) nothing is sold."""
+    from dataclasses import replace
+
+    from core.optimizer import cap_export, charge_for_sale, exported_kwh
+    p = replace(LIVE_1110, reserve_price_margin=0.3)
+    hrs = charge_for_sale(day(BUY_1110, SELL_1110, load=LOAD_1110), [True] * 12, p)
+    month = (D0.year, D0.month)
+
+    def run(hs):
+        return optimize(hs, 48, p, Strategy.MAX_GRID_TRADING, arbitrage=True, grid_energy=True)
+
+    free = run(hrs)
+    assert exported_kwh(free.hours) > 20
+    same, r, kept = cap_export(hrs, {month: 500.0}, p.capacity_kwh, run)
+    assert same is hrs and kept and r.total_cost == free.total_cost
+    priced, r, kept = cap_export(hrs, {month: 10.0}, p.capacity_kwh, run)
+    assert kept and 5 < exported_kwh(r.hours, month) <= 10 + 0.02 * p.capacity_kwh
+    assert priced[0].sell_extra > 0
+    assert r.hours[2].mode is HourMode.SELL  # 14:00, the best price of the day
+    assert r.total_cost > free.total_cost
+    _, r, kept = cap_export(hrs, {month: -3.0}, p.capacity_kwh, run)  # oversold already
+    assert kept and exported_kwh(r.hours) <= 0.02 * p.capacity_kwh
+    # the PV forecast of the planned hours counts: its surplus is always within the limit
+    sunny = [replace(h, pv=6.0) for h in hrs]
+    same, r, kept = cap_export(sunny, {}, p.capacity_kwh, run)
+    assert kept and exported_kwh(r.hours) <= 72 + 0.02 * p.capacity_kwh
+
+
+def test_sell_within_pv_counts_each_month_apart():
+    """A horizon over the month's end: the new month starts with nothing but its own PV."""
+    from dataclasses import replace
+
+    from core.optimizer import cap_export, exported_kwh
+    p = replace(LIVE_1110, reserve_price_margin=0.3)
+    start = datetime(2026, 11, 30, 21)
+    hrs = [replace(h, start=start + timedelta(hours=i)) for i, h in
+           enumerate(day(BUY_1110, SELL_1110, load=LOAD_1110))]
+
+    def run(hs):
+        return optimize(hs, 90, p, Strategy.MAX_GRID_TRADING, arbitrage=True, grid_energy=True)
+
+    assert exported_kwh(run(hrs).hours, (2026, 12)) > 1
+    _, r, kept = cap_export(hrs, {(2026, 11): 500.0}, p.capacity_kwh, run)
+    assert kept and exported_kwh(r.hours, (2026, 12)) <= 0.02 * p.capacity_kwh
+    assert exported_kwh(r.hours, (2026, 11)) > 5

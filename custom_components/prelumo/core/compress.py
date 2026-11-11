@@ -248,8 +248,8 @@ def simulate(
         hour_cost = imp * h.buy - (exp * h.sell if h.sell > 0 else 0.0) + wear
         cost += hour_cost
         traj.append(soc / cap * 100)
-        if risk:  # objective only (slot merging): reserve for a cloudy expensive run, cycle limit
-            cost += h.wear_extra * (-bus / eta if bus < 0 else 0.0)
+        if risk:  # objective only (slot merging): reserve for a cloudy expensive run, cycle and sell limits
+            cost += h.wear_extra * (-bus / eta if bus < 0 else 0.0) + h.sell_extra * exp
             cost += risk_cost(risks[i + 1], max(0.0, soc - p.house_floor / 100 * cap))
         if detail is not None:
             detail.append({
