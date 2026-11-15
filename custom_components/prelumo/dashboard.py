@@ -106,12 +106,14 @@ class _PrelumoLovelace:
 async def async_register_frontend(hass: HomeAssistant, version: str) -> None:
     """Serve the strategy module. Called from async_setup, before the slow entry setup: a page
     loaded in between would have no module, and the panel registered later times out waiting for
-    ll-strategy-dashboard-prelumo. Never fails the setup."""
+    ll-strategy-dashboard-prelumo. Served with cache headers (the ?v= version busts the cache on
+    an update): without them every refresh re-downloads the module, and on a slow phone link that
+    outlasts the frontend's wait for the strategy element. Never fails the setup."""
     if hass.data.get(_REGISTERED):
         return
     try:
         path = Path(__file__).parent / "frontend"
-        await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(path), False)])
+        await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(path), True)])
         frontend.add_extra_js_url(hass, f"{STATIC_URL}/{JS_FILE}?v={version}")
         hass.data[_REGISTERED] = True
     except Exception:
