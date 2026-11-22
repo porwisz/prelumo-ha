@@ -21,6 +21,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CLOCK_DRIFT_MAX,
+    CLOCK_SYNC_COOLDOWN,
     CONF_ALERT_ENTITY,
     CONF_EV_CALENDAR,
     CONF_EV_LIMIT,
@@ -55,6 +56,8 @@ from .const import (
     OPT_BATTERY_FIRST,
     OPT_BLOCK_EXPORT_PRICE,
     OPT_CAPACITY,
+    OPT_CLOCK_SYNC,
+    OPT_CLOCK_SYNC_SECONDS,
     OPT_EFFICIENCY,
     OPT_EV_CAPACITY,
     OPT_EV_CHARGER_KW,
@@ -216,6 +219,8 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self.shadow = True
         self.auto_mode = True
         self._clock_drift_min: int | None = None  # drift (min) of the open clock issue
+        self.clock_synced: datetime | None = None  # last time Prelumo set the inverter clock
+        self._clock_action_missing = False  # the clock action is absent (logged once)
         # learned models
         self.pv_bias = PvBias()
         self.ev_pattern = EvPattern()
@@ -494,6 +499,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         self._maybe_recover(now)
         data.clock_drift = io.clock_drift(self.hass, self.inv.clock)
         self._check_clock(data)
+        self._sync_clock(data)
         self._track_grid_energy(plan, now, data.soc)
         self._track_stock(now, data.soc)
         self._sample_house(now)
@@ -976,6 +982,41 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
                 title="Prelumo", notification_id=f"{DOMAIN}_clock",
             )
         self._clock_drift_min = minutes
+
+    @callback
+    def _sync_clock(self, data: PrelumoData) -> None:
+        """Set the inverter clock to HA time once it drifts past the option's seconds. It runs
+        the slots by its own clock; a slow drift shifts every slot change. Not tied to shadow
+        mode: the clock changes no plan. One try per cooldown - the read-back lags ~30 s."""
+        o = self.opt
+        drift = data.clock_drift
+        if not o[OPT_CLOCK_SYNC] or drift is None:
+            return
+        if abs(drift) <= timedelta(seconds=int(o[OPT_CLOCK_SYNC_SECONDS])):
+            return
+        now = dt_util.now()
+        if self.clock_synced is not None and now - self.clock_synced < CLOCK_SYNC_COOLDOWN:
+            return
+        if not self.writer.can_set_clock():
+            if not self._clock_action_missing:
+                _LOGGER.warning(
+                    "Inverter clock %+.0f s off, but action %s.%s is missing - flash the ESPHome "
+                    "firmware with 'ustaw_zegar'", drift.total_seconds(),
+                    self.writer.domain, self.writer.clock_service,
+                )
+                self._clock_action_missing = True
+            return
+        self._clock_action_missing = False
+        self.clock_synced = now
+        _LOGGER.info("Inverter clock %+.0f s off HA time: setting it", drift.total_seconds())
+
+        async def _set() -> None:
+            try:  # the nearest whole second, as the inverter keeps no fraction
+                await self.writer.set_clock(dt_util.now() + timedelta(milliseconds=500))
+            except HomeAssistantError as err:
+                _LOGGER.warning("Setting the inverter clock failed: %s", err)
+
+        self.config_entry.async_create_background_task(self.hass, _set(), f"{DOMAIN}_set_clock")
 
     def _raise_stale(self, stale: list[str]) -> None:
         names = ", ".join(stale)

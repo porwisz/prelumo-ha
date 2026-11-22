@@ -386,6 +386,46 @@ async def test_inverter_clock_off_raises_a_warning(hass: HomeAssistant, setup) -
     assert issues.async_get_issue(DOMAIN, "clock_drift") is None
 
 
+async def test_inverter_clock_is_set_past_the_drift_option(hass: HomeAssistant, setup) -> None:
+    """A clock off by more than the option's seconds is set to HA time (shadow mode or not),
+    once per cooldown; within the seconds, or with the option off, nothing is written."""
+    entry, _ = setup
+    coord = entry.runtime_data
+    clock: list = []
+
+    async def _clock(call) -> None:
+        clock.append(call.data)
+
+    hass.services.async_register("esphome", "deye_modbus_ustaw_zegar", _clock)
+
+    async def tick(offset: timedelta) -> None:
+        hass.states.async_set(f"{P}zegar", (dt_util.now() + offset).strftime("%Y-%m-%d %H:%M:%S"))
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+
+    await tick(timedelta(seconds=10))  # within the default 30 s
+    assert clock == []
+
+    await tick(timedelta(seconds=-50))
+    assert len(clock) == 1
+    now = dt_util.now()
+    set_to = datetime(clock[0]["rok"], clock[0]["miesiac"], clock[0]["dzien"],
+                      clock[0]["godzina"], clock[0]["minuta"], clock[0]["sekunda"])
+    assert abs((set_to - now.replace(tzinfo=None)).total_seconds()) < 3
+    assert hass.states.get("binary_sensor.prelumo_clock_drift").attributes["last_set"] is not None
+
+    await tick(timedelta(seconds=-50))  # read-back not in yet: no second write in the cooldown
+    assert len(clock) == 1
+
+    coord.clock_synced = None
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "clock_sync": False})
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    coord.clock_synced = None
+    await tick(timedelta(seconds=-50))
+    assert len(clock) == 1
+
+
 async def test_day_forecast_is_kept_and_judged_the_next_day(hass: HomeAssistant, setup) -> None:
     """The first plan of a day keeps what it expected; the next day it is compared with the meters."""
     from unittest.mock import AsyncMock, patch

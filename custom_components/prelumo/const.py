@@ -115,6 +115,8 @@ OPT_RCE_ESTIMATE: Final = "rce_estimate_share"
 OPT_PV_LOW: Final = "pv_pessimistic"
 OPT_DHW_BOOSTS: Final = "dhw_boosts"
 OPT_FLEX_LOADS: Final = "flex_loads"
+OPT_CLOCK_SYNC: Final = "clock_sync"
+OPT_CLOCK_SYNC_SECONDS: Final = "clock_sync_seconds"
 
 OPTION_DEFAULTS: Final = {
     OPT_CAPACITY: 20.0,
@@ -171,6 +173,8 @@ OPTION_DEFAULTS: Final = {
     OPT_DHW_BOOSTS: "03:00-07:00 50 40; 13:00-16:00 53 40 peak",
     # devices run once a day at the cheapest time: 'name HH:00-HH:00 kWh kW [entity_id] [peak]'
     OPT_FLEX_LOADS: "",
+    OPT_CLOCK_SYNC: True,  # set the inverter clock to HA time when it drifts
+    OPT_CLOCK_SYNC_SECONDS: 30,  # s of drift that triggers the correction
 }
 
 # --- runtime switches / select (restored state) ------------------------
@@ -187,3 +191,6 @@ ISSUE_CLOCK_DRIFT: Final = "clock_drift"
 
 # the inverter switches slots by its own clock: warn when it is this far from HA time
 CLOCK_DRIFT_MAX: Final = timedelta(minutes=5)
+# one clock correction at most this often: the read-back comes ~30 s later, a failed write
+# must not repeat every tick
+CLOCK_SYNC_COOLDOWN: Final = timedelta(minutes=10)

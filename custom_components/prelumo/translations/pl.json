@@ -138,7 +138,9 @@
           "pv_pessimistic": "Rezerwa domu wg pesymistycznej prognozy Solcast",
           "rce_estimate_share": "Nieopublikowane ceny RCE jako część zwykłej ceny",
           "dhw_boosts": "Podbicia CWU",
-          "flex_loads": "Odbiorniki sterowane"
+          "flex_loads": "Odbiorniki sterowane",
+          "clock_sync": "Ustawiaj zegar falownika wg czasu HA",
+          "clock_sync_seconds": "Odchyłka zegara wyzwalająca korektę"
         },
         "data_description": {
           "fallback_plan": "6 wpisów 'GG:MM SOC TRYB' oddzielonych ';', tryb: none | grid_charge | sell",
@@ -164,7 +166,9 @@
           "pv_pessimistic": "Gdy Solcast podaje pv_estimate10, rezerwa na drogie godziny liczy na tę prognozę złego dnia zamiast stałego procentu prognozy.",
           "rce_estimate_share": "Godziny bez opublikowanej ceny RCE (jutro, przed ok. 14:00) liczone są jako ten procent mediany ceny z tej samej godziny w ostatnich dniach — plan może zostawić na nie energię. 0 = brak przychodu w takich godzinach. Eksport zawsze wymaga prawdziwej ceny.",
           "dhw_boosts": "Jedno podbicie na wpis, oddzielone ';': 'HH:00-HH:00 cel potem [peak]'. Raz w oknie zasobnik jest grzany do celu, potem trzymana jest temperatura 'potem'. 'peak' = tylko w dni robocze (drogie strefy). Przykład: 03:00-07:00 50 40; 13:00-16:00 53 40 peak",
-          "flex_loads": "Urządzenia uruchamiane raz na dobę w najtańszym czasie, po jednym w wierszu albo po ';': 'nazwa HH:00-HH:00 kWh kW [encja] [peak]'. Przykład: zmywarka 22:00-06:00 1.2 2.0 switch.zmywarka. Przy włączonym przełączniku „Sterowanie odbiornikami” encja jest włączana na czas pracy i wysyłane są zdarzenia prelumo_load_start / prelumo_load_end."
+          "flex_loads": "Urządzenia uruchamiane raz na dobę w najtańszym czasie, po jednym w wierszu albo po ';': 'nazwa HH:00-HH:00 kWh kW [encja] [peak]'. Przykład: zmywarka 22:00-06:00 1.2 2.0 switch.zmywarka. Przy włączonym przełączniku „Sterowanie odbiornikami” encja jest włączana na czas pracy i wysyłane są zdarzenia prelumo_load_start / prelumo_load_end.",
+          "clock_sync": "Prelumo ustawia zegar falownika na czas Home Assistant, gdy odjedzie o więcej niż podaną liczbę sekund (także o godzinę po zmianie czasu), najwyżej raz na 10 minut. Wymaga akcji „ustaw_zegar” w firmware ESPHome.",
+          "clock_sync_seconds": "Falownik przełącza sloty harmonogramu według swojego zegara, więc sloty przesuwają się najwyżej o tyle, zanim Prelumo go poprawi."
         }
       }
     },

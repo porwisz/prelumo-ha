@@ -49,6 +49,8 @@ from .const import (
     OPT_BATTERY_FIRST,
     OPT_BLOCK_EXPORT_PRICE,
     OPT_CAPACITY,
+    OPT_CLOCK_SYNC,
+    OPT_CLOCK_SYNC_SECONDS,
     OPT_DHW_BOOSTS,
     OPT_EFFICIENCY,
     OPT_EV_CAPACITY,
@@ -307,6 +309,8 @@ class PrelumoOptionsFlow(OptionsFlow):
             req(OPT_SOC_TOLERANCE): _num(1, 50, 1, "%"),
             req(OPT_MIN_GAIN): _num(0, 50, 0.1, "PLN"),
             req(OPT_STALE_HOURS): _num(1, 48, 1, "h"),
+            req(OPT_CLOCK_SYNC): selector.BooleanSelector(),
+            req(OPT_CLOCK_SYNC_SECONDS): _num(5, 600, 1, "s"),
             req(OPT_FALLBACK_PLAN): selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
         })
         return self.async_show_form(step_id="init", data_schema=schema, errors=errors)

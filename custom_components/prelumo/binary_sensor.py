@@ -93,4 +93,9 @@ class ClockDrift(PrelumoEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict:
         d = self.coordinator.data
         drift = d.clock_drift if d else None
-        return {"drift_min": round(drift.total_seconds() / 60, 1) if drift is not None else None}
+        synced = self.coordinator.clock_synced
+        return {
+            "drift_min": round(drift.total_seconds() / 60, 1) if drift is not None else None,
+            "drift_s": round(drift.total_seconds()) if drift is not None else None,
+            "last_set": synced.isoformat() if synced else None,
+        }
