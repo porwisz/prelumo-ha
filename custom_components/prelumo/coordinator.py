@@ -180,6 +180,9 @@ def _range(text: str) -> tuple[int, int]:
     return a, b
 
 
+MONTH_ROOM_RELEASE_KWH = 0.5  # room ("sell within PV") that releases the live export block
+
+
 class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
     config_entry: ConfigEntry
 
@@ -242,6 +245,7 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         # the PV and grid-export counters at the start of this month ("sell within PV")
         self.month_start: dict[str, Any] = {}
         self.month_energy_seen: tuple[float, float] | None = None  # (PV, export) kWh this month
+        self.month_oversold = False  # live "sell within PV" block (with hysteresis)
         # hourly RCE, kept ~3 days: for yesterday's actual cost and for the live export check
         # right after a restart (persisted, so that check is not blind until the first re-plan)
         self.sell_seen: dict[datetime, float] = {}
@@ -605,7 +609,33 @@ class PrelumoCoordinator(DataUpdateCoordinator[PrelumoData]):
         the live price every 30 s as well. With no price for this hour, exporting is blocked.
         """
         price = self.sell_seen.get(now.replace(minute=0, second=0, microsecond=0))
-        return price is None or price <= self.block_export_price()
+        if price is None or price <= self.block_export_price():
+            return True
+        return self._month_oversold(now)
+
+    @callback
+    def _month_oversold(self, now: datetime) -> bool:
+        """"Sell within PV" on the live counters: no Export First once the month has exported
+        what its PV produced (23 Nov: the slots sold 3 kWh with the month 43 kWh over).
+
+        Released again only with MONTH_ROOM_RELEASE_KWH of room, so the mode does not flap
+        while a sale brings the counters level. Counters unknown: the last state is kept.
+        """
+        if not self.sell_within_pv():
+            self.month_oversold = False
+            return False
+        ms = self.month_start
+        pv = io.state_float(self.hass, self.inv.pv_total)
+        exp = io.state_float(self.hass, self.inv.grid_export_total)
+        if ms.get("month") != f"{now:%Y-%m}" or pv is None or exp is None:
+            # a new month before the first re-plan counts its start: nothing produced yet
+            return self.month_oversold if pv is None or exp is None else True
+        room = (pv - ms["pv"]) - (exp - ms["export"])
+        if room <= 0:
+            self.month_oversold = True
+        elif room >= MONTH_ROOM_RELEASE_KWH:
+            self.month_oversold = False
+        return self.month_oversold
 
     # --- average cost of the energy in the battery -------------------------
     @property

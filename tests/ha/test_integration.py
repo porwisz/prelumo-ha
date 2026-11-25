@@ -671,3 +671,26 @@ async def test_sell_within_pv_counts_the_month_from_the_inverter_counters(hass: 
         attrs = hass.states.get("sensor.prelumo_proposed_plan").attributes
         assert attrs["sell_within_pv"] is True
         assert (attrs["pv_this_month"], attrs["export_this_month"]) == (12.5, 3.0)
+
+
+async def test_month_over_its_pv_blocks_export_first_live(hass: HomeAssistant, setup) -> None:
+    """Regression (23 Nov): with "sell within PV" on and the month already over its PV, Export
+    First must never be set, whatever slots the inverter holds; released with some room again."""
+    from unittest.mock import patch
+
+    entry, _ = setup
+    coord = entry.runtime_data
+    now = dt_util.now()
+    coord.sell_seen[now.replace(minute=0, second=0, microsecond=0)] = 1.5  # a good price
+    hass.states.async_set(f"{P}suma_pv", "1000", {"unit_of_measurement": "kWh"})
+    hass.states.async_set(f"{P}suma_siec_oddanie", "400", {"unit_of_measurement": "kWh"})
+    assert coord._export_blocked(now) is False  # the option is off
+    with patch.object(coord, "sell_within_pv", return_value=True):
+        coord.month_start = {"month": f"{now:%Y-%m}", "pv": 800.0, "export": 157.0}  # 200 PV, 243 out
+        assert coord._export_blocked(now) is True
+        hass.states.async_set(f"{P}suma_pv", "1043.2", {"unit_of_measurement": "kWh"})  # room 0.2
+        assert coord._export_blocked(now) is True  # hysteresis: not released yet
+        hass.states.async_set(f"{P}suma_pv", "1044", {"unit_of_measurement": "kWh"})  # room 1.0
+        assert coord._export_blocked(now) is False
+        hass.states.async_set(f"{P}suma_siec_oddanie", "401.5", {"unit_of_measurement": "kWh"})  # -0.5
+        assert coord._export_blocked(now) is True

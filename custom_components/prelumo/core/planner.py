@@ -183,8 +183,23 @@ def build_hours(inp: PlannerInputs, hours: list[datetime]) -> tuple[list[HourInp
         frac = frac if 0 < frac < 1 else 1.0
         out[0] = replace(f, pv=f.pv * frac, load=f.load * frac, ev=f.ev * frac,
                          pv_low=None if f.pv_low is None else f.pv_low * frac,
-                         no_sell=inp.grid_charged_this_hour)
+                         no_sell=inp.grid_charged_this_hour, duration_h=frac)
     return out, missing
+
+
+def export_budgets(hours: list[HourInput], room: dict[tuple[int, int], float]) -> list[HourInput]:
+    """Each hour with its month's sale budget ("sell no more than the PV produced").
+
+    A month that has already exported its PV (``room`` <= 0; a month left out has 0) gets 0:
+    no sale in it at all, whatever PV the forecast gives later - the inverter's counters, not a
+    forecast, say when there is room again. Otherwise the room plus the plan's own PV in it.
+    """
+    pv: dict[tuple[int, int], float] = {}
+    for h in hours:
+        m = (h.start.year, h.start.month)
+        pv[m] = pv.get(m, 0.0) + h.pv
+    budget = {m: (r + pv[m] if (r := room.get(m, 0.0)) > 0 else 0.0) for m in pv}
+    return [replace(h, export_budget=budget[(h.start.year, h.start.month)]) for h in hours]
 
 
 def run_planner(
@@ -227,9 +242,13 @@ def run_planner(
         opt = run(hin)
     sell_note = None
     if inp.export_room is not None:
+        hin = export_budgets(hin, inp.export_room)
+        if any(h.export_budget is not None and h.export_budget <= 0 for h in hin):
+            sell_note = "sell_within_pv_blocked"  # a month already exported its PV: no sale in it
+            opt = run(hin)
         plain = hin
-        hin, opt, kept = cap_export(hin, inp.export_room, params.capacity_kwh, run)
-        if hin is not plain:
+        hin, opt, kept = cap_export(hin, inp.export_room, params.capacity_kwh, run, opt)
+        if hin is not plain and sell_note is None:
             sell_note = "sell_within_pv_active" if kept else "sell_within_pv_not_met"
     segs, _, tail = rolling(opt.hours, hin, inp.soc, params, window=window, grid_energy=inp.grid_energy)
     plan = to_day_plan(segs, hin, params, current, soc_now=inp.soc)

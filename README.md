@@ -116,9 +116,13 @@ poniżej tej ceny RCE sprzedaż traci pieniądze.
   sprzedaży obowiązuje zawsze.
 - **Sprzedaż nie większa niż produkcja PV** (domyślnie wył.) — w miesiącu kalendarzowym plan
   oddaje do sieci nie więcej, niż wyprodukowało PV: liczniki falownika (suma PV − suma oddania
-  od początku miesiąca) plus prognoza PV na planowane godziny. Limit jest trzymany ceną, nie
-  zakazem — gdy zapas się kończy, odpadają najgorzej płatne sprzedaże. Atrybuty
-  `pv_this_month` / `export_this_month` na `sensor.prelumo_proposed_plan`.
+  od początku miesiąca) plus prognoza PV na planowane godziny. Dopóki jest zapas, limit jest
+  trzymany ceną — gdy się kończy, odpadają najgorzej płatne sprzedaże — i sprawdzany także na
+  slotach zapisywanych do falownika (reguła `sell_over_month_pv`). Gdy miesiąc oddał już tyle,
+  ile wyprodukowało PV, sprzedaży nie ma wcale: plan nie planuje żadnej (nota
+  `sell_within_pv_blocked`), a na żywo `export_blocked` nie dopuszcza Export First, dopóki
+  liczniki nie pokażą znowu 0,5 kWh zapasu. Atrybuty `pv_this_month` / `export_this_month` na
+  `sensor.prelumo_proposed_plan`.
 - **Cena blokady eksportu** (domyślnie 0) — przy RCE ≤ tej wartości Prelumo nigdy nie ustawia
   Export First. Plan i tak nie planuje sprzedaży bez dodatniej ceny (twarda reguła
   `sell_without_price`), ale ten próg jest sprawdzany **na żywo co 30 s**, więc działa też wtedy,

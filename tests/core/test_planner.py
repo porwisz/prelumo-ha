@@ -175,3 +175,70 @@ def test_pessimistic_pv_raises_the_reserve_kept_for_expensive_hours():
     # never more PV than the forecast itself
     high = [HourInput(h.start, h.pv, h.load, h.ev, h.buy, h.sell, pv_low=5.0) for h in hrs]
     assert expensive_reserve(high, p)[0] == 0.0
+
+
+# --- "sell no more than the PV produced in the month" (23 Nov 2026) -------------------------
+from datetime import datetime as _dt  # noqa: E402
+
+from core.compress import Setting, simulate  # noqa: E402
+from core.optimizer import BatteryParams, HourMode, HourInput, Strategy  # noqa: E402
+from core.planner import PlannerInputs, export_budgets, run_planner  # noqa: E402
+from core.plan import SlotMode  # noqa: E402
+from core.tariff import G13Tariff  # noqa: E402
+
+_LIVE = BatteryParams(capacity_kwh=26.25, min_soc=20, max_soc=98, max_charge_kw=10, max_discharge_kw=10,
+                      soc_step=2, max_grid_charge_price=0.63, battery_first_above=0.63, min_sell_soc=20,
+                      sell_min_power_kw=6)
+_RCE_23 = {0: 0.62, 1: 0.6, 2: 0.58, 3: 0.57, 4: 0.6, 5: 0.75, 6: 1.1, 7: 1.47, 8: 1.54, 9: 1.5,
+           10: 1.34, 11: 1.2, 12: 1.1, 13: 1.0, 14: 1.05, 15: 1.2, 16: 1.45, 17: 1.6, 18: 1.55,
+           19: 1.3, 20: 1.0, 21: 0.8, 22: 0.7, 23: 0.65}
+
+
+def _morning_23(room):
+    """The re-plan of 23 Nov 07:53: SoC 60 %, the morning's RCE 1.47-1.54, month over its PV."""
+    now = _dt(2026, 11, 23, 7, 53)
+    hs = [now.replace(minute=0) + timedelta(hours=i) for i in range(24)]
+    sell = {h: _RCE_23[h.hour] for h in hs}
+    pv = {h: (0.3 if 9 <= h.hour < 15 else 0.0) for h in hs}
+    load = [1.3] * 24
+    inp = PlannerInputs(now, 60.0, pv, load, [0.0] * 24, EvForecast([0.0] * 24, [], [False] * 24), sell,
+                        G13Tariff(0.9048, 1.4961, 0.6257), 24, export_room=room)
+    return run_planner(inp, _LIVE, Strategy.MAX_GRID_TRADING, arbitrage=True)
+
+
+def test_oversold_month_writes_no_sale():
+    """Regression (23 Nov): the month had exported 43 kWh more than its PV, the optimiser kept
+    0.11 kWh of sale, and the merged slots wrote "sell to 40 %" for 07:00-13:00 - the battery
+    sold ~3 kWh. A month over its PV gets no sale at all, in the plan and in the slots."""
+    r = _morning_23({(2026, 11): 204.9 - 247.7})
+    assert "sell_within_pv_blocked" in r.notes
+    assert all(h.battery_export < 1e-6 for h in r.optimum.hours)
+    assert all(s.mode is not SlotMode.SELL for s in r.plan.slots), r.plan.slots
+    assert all(h["mode"] != "sell" for h in r.slot_hourly)
+
+
+def test_month_with_room_sells_within_it_in_the_slots():
+    budget = 1.0
+    r = _morning_23({(2026, 11): budget})
+    sold = sum(h["export"] for h in r.slot_hourly if h["mode"] == "sell")
+    assert sold <= budget + 1.8 + 0.02 * _LIVE.capacity_kwh + 1e-6  # room + the plan's own PV
+    assert not any("sell_over_month_pv" in v for v in r.slot_plan_issues)
+    unlimited = _morning_23(None)  # the limit off: the morning prices do sell
+    assert any(s.mode is SlotMode.SELL for s in unlimited.plan.slots)
+
+
+def test_export_budgets():
+    hs = [HourInput(_dt(2026, 11, 30, 22) + timedelta(hours=i), 1.0, 0.5, 0, 0.9, 1.0) for i in range(4)]
+    b = [h.export_budget for h in export_budgets(hs, {(2026, 11): 3.0})]
+    assert b == [5.0, 5.0, 0.0, 0.0]  # December: nothing produced yet, no room
+    assert [h.export_budget for h in export_budgets(hs, {(2026, 11): -1.0})][:2] == [0.0, 0.0]
+
+
+def test_running_hour_has_only_its_minutes_of_power():
+    """Regression (23 Nov 07:53): the slot simulation sold 5.1 kWh in the 7 minutes left of the
+    hour (~44 kW), so a sell slot to 40 % looked like a sale that ends at 08:00."""
+    h = HourInput(_dt(2026, 11, 23, 7), 0.0, 0.15, 0, 0.9048, 1.47, duration_h=7 / 60)
+    detail: list[dict] = []
+    simulate([h], [Setting(HourMode.SELL, 40, 6.0)], 60, _LIVE, detail=detail)
+    assert detail[0]["battery"] <= 6.0 * 7 / 60 + 1e-6
+    assert detail[0]["soc"] >= 57  # ~0.7 kWh of 26 kWh, not 60 -> 40 %

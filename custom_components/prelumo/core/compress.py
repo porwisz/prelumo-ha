@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .optimizer import (
+    EXPORT_BUDGET_TOL,
     FULL_CHARGE_PENALTY,
     SELL_THEN_BUY_KWH,
     BatteryParams,
@@ -139,7 +140,10 @@ def simulate(
     free = sell_free(hours, p)
     risks = pv_risk(hours, p) if risk else []
     run_kw = sell_kw
+    month_sold: dict[tuple[int, int], float] = {}  # battery kWh sold per calendar month
+    budget_tol = EXPORT_BUDGET_TOL * cap
     for i, (h, st) in enumerate(zip(hours, settings)):
+        d = h.duration_h  # power limits give this much energy in the (partial) hour
         def broke(rule: str, _h: HourInput = h) -> float:
             if violations is not None:
                 violations.append(f"{_h.start:%H:%M} {rule}")
@@ -164,8 +168,8 @@ def simulate(
                     run = 1
                     while i + run < len(settings) and settings[i + run] == st:
                         run += 1
-                    peak = max(max(0.0, x.load + x.ev - x.pv) for x in hours[i:i + run])
-                    spread = max(0.0, soc - lo) * eta / run
+                    peak = max(max(0.0, x.load + x.ev - x.pv) / x.duration_h for x in hours[i:i + run])
+                    spread = max(0.0, soc - lo) * eta / sum(x.duration_h for x in hours[i:i + run])
                     want = max(math.floor(spread * 10) / 10, math.ceil((peak + 0.3) * 10) / 10,
                                p.sell_min_power_kw)
                     run_kw = min(p.max_discharge_kw, p.grid_export_kw + peak, want)
@@ -174,6 +178,9 @@ def simulate(
             if h.sell <= 0:
                 # hard rule: no Export First where the RCE price is unknown (or not positive)
                 cost += broke("sell_without_price")
+            if h.export_budget is not None and h.export_budget <= 1e-9:
+                # hard rule: the month has already exported all its PV - no Export First at all
+                cost += broke("sell_over_month_pv")
             if h.no_sell:
                 # hard rule: the battery charged from the grid earlier in this clock hour - no
                 # Export First in the same hour (buy and sell the same energy)
@@ -194,21 +201,21 @@ def simulate(
             # the inverter would charge from the grid at this price (and the house runs on grid)
             cost += broke("grid_charge_above_price_cap")
         if st.mode is HourMode.GRID_CHARGE and soc < target:
-            e = min(target - soc, p.max_charge_kw * eta, max_charge_kwh(soc / cap * 100, p))
+            e = min(target - soc, p.max_charge_kw * d * eta, max_charge_kwh(soc / cap * 100, p, d))
             bus = e / eta
         elif st.mode is HourMode.SELL and soc > lo:
             # the battery output covers the house and exports at most the inverter's sell limit
-            out_kw = max(0.0, min(run_kw, p.grid_export_kw + net))
-            e = min(soc - lo, out_kw / eta, p.max_discharge_kw)
+            out_kwh = max(0.0, min(run_kw * d, p.grid_export_kw * d + net))
+            e = min(soc - lo, out_kwh / eta, p.max_discharge_kw * d)
             bus = -e * eta
         elif net < 0 and soc < hi:
-            e = min(-net * eta, hi - soc, p.max_charge_kw * eta, max_charge_kwh(soc / cap * 100, p))
+            e = min(-net * eta, hi - soc, p.max_charge_kw * d * eta, max_charge_kwh(soc / cap * 100, p, d))
             bus = e / eta
         elif net > 0 and soc > lo:
-            e = min(net / eta, soc - lo, p.max_discharge_kw)
+            e = min(net / eta, soc - lo, p.max_discharge_kw * d)
             bus = -e * eta
         if st.mode is HourMode.GRID_CHARGE and soc >= target and net > 0 and soc > lo:
-            e = min(net / eta, soc - target, p.max_discharge_kw)
+            e = min(net / eta, soc - target, p.max_discharge_kw * d)
             bus = -e * eta
         soc += bus * eta if bus > 0 else bus / eta
         g = net + bus
@@ -216,7 +223,7 @@ def simulate(
         if st.mode is HourMode.SELL and bus < 0 and net > 0:
             # Export First discharges at full slot power until the floor, then the battery stops
             # covering the house for the rest of the slot: the house buys from the grid
-            rate = min(run_kw, p.grid_export_kw + net)
+            rate = min(run_kw * d, p.grid_export_kw * d + net)  # kWh the slot power gives in the hour
             tau = min(1.0, -bus / rate) if rate > 0 else 0.0
             shift = net * (1.0 - tau)
             if shift > SELL_THEN_BUY_KWH:
@@ -225,8 +232,15 @@ def simulate(
                 cost += broke("sell_then_buy_in_hour")
             imp += shift
             exp += shift
-        exp = min(exp, p.grid_export_kw)
+        exp = min(exp, p.grid_export_kw * d)
         sold = max(0.0, min(-bus, -g)) if bus < 0 else 0.0  # the part of the discharge that was exported
+        if h.export_budget is not None and h.export_budget > 1e-9 and sold > 1e-9:
+            m = (h.start.year, h.start.month)
+            month_sold[m] = month_sold.get(m, 0.0) + sold
+            if month_sold[m] > h.export_budget + budget_tol:
+                # hard rule: the slots sell more in the month than its PV gives (the optimiser
+                # keeps this with a price, the merged slots must keep it too)
+                cost += broke("sell_over_month_pv")
         if not free[i]:
             sold_since_cheap += sold
         cheap = p.max_grid_charge_price is not None and h.buy <= p.max_grid_charge_price + 1e-9

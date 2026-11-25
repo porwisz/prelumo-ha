@@ -130,6 +130,14 @@ class HourInput:
     # objective only: PLN per kWh exported to the grid in this hour - how the monthly limit
     # "sell no more than the PV produced" is kept (see ``cap_export``)
     sell_extra: float = 0.0
+    # hard limit "sell no more than the PV produced": kWh of battery sales this hour's calendar
+    # month may still take in the plan (what the month has left plus the plan's own PV in it;
+    # 0 = the month has already exported its PV - no sale at all). None = the limit is off.
+    # The optimiser refuses any sale at 0; the slot simulator counts the sales against it.
+    export_budget: float | None = None
+    # hours of this step: below 1 for the running (partial) hour - the inverter's power limits
+    # give that much less energy in it
+    duration_h: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -355,18 +363,19 @@ def _transition(
     reserve: float = 0.0, grid_energy: bool = False, free: bool = False,
 ) -> _Step | None:
     delta = (s1 - s0) / 100 * p.capacity_kwh  # battery side
+    d = h.duration_h
     if delta > 0:
         bus = delta / p.eta
-        if bus > p.max_charge_kw + 1e-9:
+        if bus > p.max_charge_kw * d + 1e-9:
             return None
         # BMS taper: a step of the SoC grid may round up by up to half a step - never above
         # TAPER_STRICT_FROM; a climb to max that needs the next hour too is a topping entry
         slack = 0.5 * max(1, p.soc_step) / 100 * p.capacity_kwh if s1 <= TAPER_STRICT_FROM else 0.0
-        if delta > max_charge_kwh(s0, p) + slack + 1e-9 and not topping_entry(s0, s1, p):
+        if delta > max_charge_kwh(s0, p, d) + slack + 1e-9 and not topping_entry(s0, s1, p):
             return None
     else:
         bus = delta * p.eta  # negative = delivered to the house bus
-        if -delta > p.max_discharge_kw + 1e-9:
+        if -delta > p.max_discharge_kw * d + 1e-9:
             return None
 
     total_load = h.load + h.ev
@@ -385,7 +394,7 @@ def _transition(
             return None  # charging while the house would buy at this price
         # at a high enough sell price the battery exports instead of covering the house
         if bus <= 0 and not free:
-            need = min(base_deficit if ev_blocked else deficit, p.max_discharge_kw * p.eta)
+            need = min(base_deficit if ev_blocked else deficit, p.max_discharge_kw * d * p.eta)
             step_kwh = max(1, p.soc_step) / 100 * p.capacity_kwh * p.eta
             # SoC-grid rounding either way: a shortfall below one step is bought (the inverter
             # really covers it from the battery). Only rounding up would waste up to a step
@@ -415,7 +424,7 @@ def _transition(
         delivered -= battery_export
         battery_export = 0.0
     if battery_export > EPS and (strategy is Strategy.SELF_CONSUMPTION or not may_export or s1 < p.min_sell_soc
-                                 or h.no_sell):
+                                 or h.no_sell or (h.export_budget is not None and h.export_budget <= EPS)):
         return None
     if battery_export > EPS and reserve > 1e-9 and (s1 - p.house_floor) / 100 * p.capacity_kwh < reserve - 1e-9:
         return None  # keep energy for the house in the coming expensive hours
@@ -425,7 +434,7 @@ def _transition(
         # A sell slot discharges at its power (never below sell_min_power) until its floor; then
         # the battery stops covering the house, which buys for the rest of the hour. So a sale
         # while the house draws must last (almost) the whole hour - a small one is not doable.
-        rate = min(p.sell_min_power_kw, p.max_discharge_kw, p.grid_export_kw + deficit)
+        rate = min(p.sell_min_power_kw, p.max_discharge_kw, p.grid_export_kw + deficit / d) * d
         if delivered < rate * (1 - SELL_THEN_BUY_KWH / deficit) - 1e-6:
             return None
     if (grid_charge > EPS and p.max_grid_charge_price is not None
@@ -439,7 +448,7 @@ def _transition(
     penalty = 0.0
     if imp > p.grid_import_kw + 1e-9:
         penalty = INFEASIBLE * (imp - p.grid_import_kw)
-    exp = min(exp, p.grid_export_kw)  # the rest is curtailed
+    exp = min(exp, p.grid_export_kw * d)  # the rest is curtailed
     revenue = exp * h.sell if h.sell > 0 else 0.0  # negative price -> curtail
     wear = (-delta) * p.wear_cost if delta < 0 else 0.0
     return _Step(imp * h.buy - revenue + wear + penalty, imp, exp, grid_charge, battery_export)
@@ -614,6 +623,7 @@ def cap_discharge(
     return priced(), res, not over(res)
 
 
+EXPORT_BUDGET_TOL = 0.02  # share of the capacity a month's sales may run over its PV budget (rounding)
 MAX_SELL_EXTRA = 10.0  # PLN/kWh: above any sell price - what is still exported then is PV surplus
 
 Month = tuple[int, int]  # (year, month)
@@ -630,7 +640,7 @@ def exported_kwh(plan: list[HourPlan], month: Month | None = None) -> float:
 
 def cap_export(
     hours: list[HourInput], room: dict[Month, float], capacity_kwh: float,
-    run: Callable[[list[HourInput]], OptimizeResult],
+    run: Callable[[list[HourInput]], OptimizeResult], first: OptimizeResult | None = None,
 ) -> tuple[list[HourInput], OptimizeResult, bool]:
     """Keep the plan's export within what the PV produces in the calendar month.
 
@@ -640,14 +650,15 @@ def cap_export(
 
     Kept with a price, as the cycle limit is: a month over its budget gets the smallest cost per
     exported kWh (``HourInput.sell_extra``) that brings it within - the worst-paid sales go first.
+    ``first``: the plan of ``hours`` if already run.
     Returns (hours with the extra cost, the plan, all budgets kept).
     """
     budgets: dict[Month, float] = {}
     for h in hours:
         m = month_of(h.start)
         budgets[m] = budgets.get(m, room.get(m, 0.0)) + h.pv
-    tol = 0.02 * capacity_kwh
-    res = run(hours)
+    tol = EXPORT_BUDGET_TOL * capacity_kwh
+    res = first if first is not None else run(hours)
 
     def over(r: OptimizeResult) -> list[Month]:
         return [m for m in sorted(budgets) if exported_kwh(r.hours, m) > max(0.0, budgets[m]) + tol]
